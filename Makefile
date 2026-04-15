@@ -176,7 +176,7 @@ deploy: ## Sync public/ assets to S3 + invalidate CloudFront
 	CFID=$${CF_DISTRIBUTION_ID:-$$(docker compose run --rm -T pulumi stack output reeds_distribution_id 2>/dev/null | tail -1)}; \
 	test -n "$$BUCKET" || { echo "❌  Could not determine SITE_BUCKET — run 'make infra-up' first"; exit 1; }; \
 	echo "→ Deploying public/ to $$BUCKET"; \
-	docker compose run --rm awscli s3 sync /app/public/ s3://$$BUCKET --delete --exclude '.DS_Store'; \
+	docker compose run --rm awscli s3 sync /app/public/ s3://$$BUCKET --delete --exclude '.DS_Store' --exclude 'digest/*'; \
 	if [ -n "$$CFID" ]; then \
 		docker compose run --rm awscli cloudfront create-invalidation --distribution-id $$CFID --paths '/*'; \
 	fi
