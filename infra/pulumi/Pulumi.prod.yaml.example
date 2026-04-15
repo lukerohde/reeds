@@ -1,0 +1,15 @@
+config:
+  aws:region: eu-west-1
+  reads:domainName: reads.example.com
+  reads:bucketName: myusername-reads   # must be globally unique in S3
+
+  # DNS — provide ONE of the following:
+
+  # Option A: you have an aws-quill parent project (recommended)
+  reads:parentIngressStack: myorg/myproject-ingress/prod
+
+  # Option B: you already have a Route53 hosted zone
+  # reads:zoneId: Z1234567890ABCDEFGHIJ
+
+  # Option C: leave both commented out — reads will create a new Route53 zone
+  #           and export nameservers for you to add at your registrar

@@ -1,0 +1,49 @@
+name: Deploy Static Assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# Only PULUMI_ACCESS_TOKEN is needed as a GitHub secret.
+# AWS credentials obtained via OIDC from the parent ingress stack.
+# Bucket + CF distribution ID read from the reeds Pulumi stack.
+
+jobs:
+  deploy:
+    name: Sync public/ to S3
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pulumi/setup-pulumi@v2
+
+      - name: Get config from Pulumi
+        id: config
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          pulumi login
+          echo "DEPLOY_ROLE_ARN=$(pulumi stack output deploy_role_arn -s lukerohde/lukerohde-ingress/prod)" >> $GITHUB_OUTPUT
+          echo "SITE_BUCKET=$(pulumi stack output reeds_bucket -s lukerohde/lukerohde-reeds/prod)" >> $GITHUB_OUTPUT
+          echo "CF_DISTRIBUTION_ID=$(pulumi stack output reeds_distribution_id -s lukerohde/lukerohde-reeds/prod)" >> $GITHUB_OUTPUT
+          echo "AWS_REGION=$(pulumi stack output aws_region -s lukerohde/lukerohde-ingress/prod)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.config.outputs.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ steps.config.outputs.AWS_REGION }}
+
+      - name: Deploy
+        env:
+          SITE_BUCKET: ${{ steps.config.outputs.SITE_BUCKET }}
+          CF_DISTRIBUTION_ID: ${{ steps.config.outputs.CF_DISTRIBUTION_ID }}
+        run: make deploy

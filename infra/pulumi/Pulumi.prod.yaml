@@ -1,0 +1,5 @@
+config:
+  aws:region: eu-west-1
+  lukerohde-reeds:domainName: reeds.lukeroh.de
+  lukerohde-reeds:bucketName: lukerohde-reeds
+  lukerohde-reeds:parentIngressStack: lukerohde/lukerohde-ingress/prod

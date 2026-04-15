@@ -1,0 +1,67 @@
+blogs:
+  - author: Simon Willison
+    url: https://simonwillison.net
+    feed: https://simonwillison.net/atom/everything/
+  - author: Andrej Karpathy
+    url: https://karpathy.bearblog.dev
+    feed: https://karpathy.bearblog.dev/feed/
+  - author: Martin Fowler
+    url: https://martinfowler.com
+    feed: https://martinfowler.com/feed.atom
+  - author: Charity Majors
+    url: https://charity.wtf
+    feed: https://charity.wtf/feed/
+  - author: Thorsten Ball
+    url: https://thorstenball.com
+    feed: https://thorstenball.com/atom.xml
+  - author: Kent Beck
+    url: https://tidyfirst.substack.com
+    feed: https://tidyfirst.substack.com/feed
+  - author: Henrik Kniberg
+    url: https://blog.crisp.se/author/henrikkniberg
+    feed: https://blog.crisp.se/feed
+  - author: Steve Yegge
+    url: https://steve-yegge.blogspot.com
+    feed: https://steve-yegge.blogspot.com/feeds/posts/default
+  - author: Addy Osmani
+    url: https://addyosmani.com/blog
+    feed: https://addyosmani.com/blog/rss.xml
+  - author: Bryan Cantrill
+    url: https://bcantrill.dtrace.org
+    feed: https://bcantrill.dtrace.org/index.xml
+
+settings:
+  content_limit: 8000      # chars stored in DynamoDB per article
+  candidates_pool: 20      # unserved articles to consider per digest run
+  digest_size: 10          # articles curated into the final digest
+  words_per_minute: 200    # used to calculate read-time label
+
+prompts:
+  relevance_check: |
+    Answer only 'yes' or 'no'.
+    Is this article primarily about AI, machine learning, software engineering,
+    devops, observability, programming, or technology leadership?
+    Reply 'no' for personal life, travel, cultural events, or unrelated topics.
+
+    Title: {title}
+    Preview: {preview}
+
+  summarise: |
+    Extract the 2-3 most important sentences from this article, quoted verbatim
+    from the text. Ignore navigation, ads, and boilerplate — only return the core idea
+    in the author's own words. No introduction, no commentary, just the sentences.
+
+    Title: {title}
+    Author: {author}
+
+    {text}
+
+  curate: |
+    You are curating a daily reading digest for senior software engineers.
+
+    From the articles below, select the {n} most fascinating — prioritise depth,
+    novelty, and practical insight over announcements or opinion pieces.
+
+    Reply with only the selected URLs, one per line. No commentary.
+
+    {articles}

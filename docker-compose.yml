@@ -1,0 +1,104 @@
+# Three Musketeers — every command runs in a container.
+# Local: copy .env.example → .env and fill in values.
+# CI:    inject secrets as environment variables.
+
+services:
+
+  # ── Crawler Lambda — local invocation (make crawl) ───────────────────────────
+  crawler:
+    image: python:3.12-slim
+    working_dir: /app/backend/crawler
+    volumes:
+      - .:/app
+      - ./config/config.yaml:/app/backend/crawler/config.yaml:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+      DYNAMODB_TABLE: ${DYNAMODB_TABLE:-}
+    entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
+
+  # ── Digest Lambda — local invocation (make digest) ───────────────────────────
+  digester:
+    image: python:3.12-slim
+    working_dir: /app/backend/digest
+    volumes:
+      - .:/app
+      - ./config/config.yaml:/app/backend/digest/config.yaml:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+      DYNAMODB_TABLE: ${DYNAMODB_TABLE:-}
+      BUCKET_NAME: ${BUCKET_NAME:-}
+      CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
+
+  # ── Pulumi — reeds infra (make infra-*) ───────────────────────────────────────
+  pulumi:
+    build: ./infra/pulumi
+    working_dir: /app/infra/pulumi
+    volumes:
+      - .:/app
+      - pulumi_plugins:/root/.pulumi/plugins
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      PULUMI_ACCESS_TOKEN: ${PULUMI_ACCESS_TOKEN:-}
+      PULUMI_STACK: ${PULUMI_STACK:-prod}
+      PULUMI_SKIP_UPDATE_CHECK: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+  # ── AWS CLI — deploy: s3 sync + CloudFront invalidation (make deploy) ─────────
+  awscli:
+    image: amazon/aws-cli:2.17.0
+    volumes:
+      - .:/app
+    working_dir: /app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+
+  # ── GitHub CLI — fallback if gh not installed on host (make gh ARGS='...') ────
+  gh:
+    image: ghcr.io/cli/cli:latest
+    volumes:
+      - .:/workspace
+      - gh_config:/root/.config/gh
+    working_dir: /workspace
+    environment:
+      GH_TOKEN: ${GH_TOKEN:-}
+
+  # ── LocalStack — local AWS (DynamoDB + S3) for offline dev (make local-*) ─────
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: dynamodb,s3
+      DEFAULT_REGION: eu-west-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+volumes:
+  pulumi_plugins:
+  gh_config:
+  localstack_data:

@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+
+# Pulumi state (managed in Pulumi Cloud, not git)
+.pulumi/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Docker bind-mount targets (config.yaml is mounted into handler dirs at runtime)
+backend/*/config.yaml
+
+# Lambda vendored packages (populated by `make build-lambdas`)
+backend/*/packages/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,61 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/pulumi/**"
+      - "backend/**"
+      - "config/**"
+  pull_request:
+    paths:
+      - "infra/pulumi/**"
+      - "backend/**"
+      - "config/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# GitHub secrets needed: PULUMI_ACCESS_TOKEN, ANTHROPIC_API_KEY.
+# AWS credentials are obtained via OIDC — the role ARN is read from the parent
+# ingress stack (lukerohde/lukerohde-ingress/prod), which /setup fills in.
+
+jobs:
+  infra:
+    name: Reeds Infra ${{ github.event_name == 'pull_request' && 'Preview' || 'Up' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pulumi/setup-pulumi@v2
+
+      - name: Get infra role ARN
+        id: roles
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          pulumi login
+          echo "INFRA_ROLE_ARN=$(pulumi stack output infra_role_arn -s lukerohde/lukerohde-ingress/prod)" >> $GITHUB_OUTPUT
+          echo "AWS_REGION=$(pulumi stack output aws_region -s lukerohde/lukerohde-ingress/prod)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.roles.outputs.INFRA_ROLE_ARN }}
+          aws-region: ${{ steps.roles.outputs.AWS_REGION }}
+
+      - name: Preview
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make infra-preview
+
+      - name: Apply
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make infra-up

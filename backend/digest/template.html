@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%HEADING% — reeds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:           #fefdf8;
+    --surface:      #f5f2eb;
+    --border:       #e0dbd0;
+    --border-light: #ede9e0;
+    --text:         #1c1a16;
+    --muted:        #7a7468;
+    --link:         #4a7c5f;
+    --link-hover:   #2f5c42;
+    --sage:         #4a7c5f;
+    --font:         'DM Sans', system-ui, -apple-system, sans-serif;
+    --max-w:        680px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html {
+    font-family: var(--font);
+    font-size: 17px;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body { min-height: 100vh; display: flex; flex-direction: column; line-height: 1.7; }
+  main { flex: 1; }
+  a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+  a:hover { color: var(--link-hover); }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 1.5rem; }
+  header {
+    border-bottom: 1px solid var(--border-light);
+    background: var(--bg);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .nav {
+    height: 52px; display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .nav-home {
+    font-weight: 600; font-size: 0.95rem; color: var(--sage);
+    text-decoration: none; letter-spacing: -0.01em;
+  }
+  .nav-home:hover { color: var(--link-hover); }
+  .nav-links { display: flex; gap: 1.75rem; align-items: center; }
+  .nav-links a {
+    font-size: 0.875rem; color: var(--muted);
+    text-decoration: none; transition: color 0.1s;
+  }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); font-weight: 500; }
+  .page-header {
+    padding: 2.5rem 0 1.5rem;
+    border-bottom: 1px solid var(--border-light);
+    margin-bottom: 0;
+  }
+  .page-header h1 {
+    font-size: 1.4rem; font-weight: 600; letter-spacing: -0.02em;
+  }
+  article {
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--border-light);
+  }
+  article:last-child { border-bottom: none; }
+  h2 { font-size: 1.05rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.3rem; }
+  h2 a { color: var(--text); text-decoration: none; }
+  h2 a:hover { color: var(--link); text-decoration: underline; }
+  .meta {
+    color: var(--muted); font-size: 0.82rem; margin-bottom: 0.6rem;
+  }
+  .summary { font-size: 0.95rem; line-height: 1.75; color: var(--text); }
+  footer {
+    border-top: 1px solid var(--border-light);
+    padding: 2rem 0; margin-top: 4rem;
+  }
+  .footer-inner {
+    display: flex; align-items: center; gap: 0.75rem;
+    font-size: 0.825rem; color: var(--muted); flex-wrap: wrap;
+  }
+  .footer-inner a { color: var(--muted); text-decoration: none; }
+  .footer-inner a:hover { color: var(--link); }
+  .footer-sep { opacity: 0.4; }
+  @media (max-width: 600px) {
+    html { font-size: 16px; }
+    .nav-links { gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <nav class="nav container">
+    <a href="https://lukeroh.de" class="nav-home">Luke Rohde</a>
+    <div class="nav-links">
+      <a href="/digest/latest/" class="active">reeds</a>
+    </div>
+  </nav>
+</header>
+<main>
+  <div class="container">
+    <div class="page-header">
+      <h1>%HEADING%</h1>
+    </div>
+    %ITEMS%
+  </div>
+</main>
+<footer>
+  <div class="container footer-inner">
+    <a href="https://lukeroh.de">Luke Rohde</a>
+    <span class="footer-sep">·</span>
+    <a href="/digest/latest/">reeds</a>
+    <span class="footer-sep">·</span>
+    %PREV_LINK%
+    <span>daily digest of AI, devops &amp; software</span>
+  </div>
+</footer>
+</body>
+</html>
