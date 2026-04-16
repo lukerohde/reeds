@@ -146,6 +146,79 @@ class TestRenderOnly:
         assert all(item['served_date'] == '' for item in items)
 
 
+# ── TestPrevDigestDate — previous link logic ──────────────────────────────────
+
+class TestPrevDigestDate:
+    """prev_digest_date must derive the previous digest date from DynamoDB served_date values."""
+
+    def test_returns_none_when_no_prior_digests(self):
+        from handler import prev_digest_date
+        assert prev_digest_date('2099-01-01') is None
+
+    def test_returns_most_recent_prior_date(self):
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        for i, date in enumerate(['2099-01-01', '2099-01-02', '2099-01-03']):
+            table.put_item(Item={
+                'url':            f'https://example.com/prev-{i}',
+                'author':         'Author',
+                'title':          f'Article {i}',
+                'published_date': now.isoformat(),
+                'fetched_date':   now.isoformat(),
+                'served_date':    date,
+                'word_count':     '100',
+                'content':        '',
+            })
+        from handler import prev_digest_date
+        assert prev_digest_date('2099-01-04') == '2099-01-03'
+
+    def test_excludes_current_date(self):
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        for i, date in enumerate(['2099-01-01', '2099-01-02']):
+            table.put_item(Item={
+                'url':            f'https://example.com/excl-{i}',
+                'author':         'Author',
+                'title':          f'Article {i}',
+                'published_date': now.isoformat(),
+                'fetched_date':   now.isoformat(),
+                'served_date':    date,
+                'word_count':     '100',
+                'content':        '',
+            })
+        from handler import prev_digest_date
+        assert prev_digest_date('2099-01-02') == '2099-01-01'
+
+    def test_prev_link_appears_in_html(self):
+        """build_html with a prev_date_str must render a ← previous link."""
+        from handler import build_html
+        articles = [{
+            'url':            'https://example.com/a',
+            'title':          'Test Article',
+            'author':         'Author',
+            'published_date': '2099-01-02T00:00:00+00:00',
+            'summary':        'A summary.',
+        }]
+        html = build_html(articles, '2099-01-02', '2099-01-01')
+        assert '← previous' in html
+        assert '/digest/2099-01-01/' in html
+
+    def test_no_prev_link_when_none(self):
+        """build_html with prev_date_str=None must not render a previous link."""
+        from handler import build_html
+        articles = [{
+            'url':            'https://example.com/a',
+            'title':          'Test Article',
+            'author':         'Author',
+            'published_date': '2099-01-02T00:00:00+00:00',
+            'summary':        'A summary.',
+        }]
+        html = build_html(articles, '2099-01-02', None)
+        assert '← previous' not in html
+
+
 # ── TestCurateWithAI — one AI call ────────────────────────────────────────────
 
 @pytest.mark.skipif(not HAS_AI, reason='ANTHROPIC_API_KEY not set')

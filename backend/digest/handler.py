@@ -114,12 +114,14 @@ def read_time_label(word_count):
     return '< 1 min read' if minutes == 0 else f'{minutes} min read'
 
 
-def prev_digest_date(bucket, current_date_str):
+def prev_digest_date(current_date_str):
     try:
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix='digest/', Delimiter='/')
-        dates = [p['Prefix'].rstrip('/').split('/')[-1] for p in resp.get('CommonPrefixes', [])]
-        past = [d for d in dates if len(d) == 10 and d != current_date_str]
-        return max(past) if past else None
+        resp = table.scan(
+            FilterExpression=Attr('served_date').ne('') & Attr('served_date').ne(current_date_str),
+            ProjectionExpression='served_date',
+        )
+        dates = {item['served_date'] for item in resp.get('Items', [])}
+        return max(dates) if dates else None
     except Exception:
         return None
 
@@ -176,7 +178,7 @@ def handler(event, context):
     if not articles:
         return {'message': 'No articles to serve'}
 
-    prev_date_str = None if DRY_RUN else prev_digest_date(BUCKET_NAME, date_str)
+    prev_date_str = None if DRY_RUN else prev_digest_date(date_str)
     html = build_html(articles, date_str, prev_date_str)
 
     if DRY_RUN:
@@ -189,14 +191,17 @@ def handler(event, context):
             s3.put_object(Bucket=BUCKET_NAME, Key=key, Body=html.encode(), ContentType='text/html')
             print(f"[digest] uploaded → s3://{BUCKET_NAME}/{key}")
         if CF_DIST_ID:
-            cf.create_invalidation(
-                DistributionId=CF_DIST_ID,
-                InvalidationBatch={
-                    'Paths': {'Quantity': 2, 'Items': ['/digest/latest/*', f'/digest/{date_str}/*']},
-                    'CallerReference': date_str,
-                },
-            )
-            print(f"[digest] CloudFront invalidation created for {CF_DIST_ID}")
+            try:
+                cf.create_invalidation(
+                    DistributionId=CF_DIST_ID,
+                    InvalidationBatch={
+                        'Paths': {'Quantity': 2, 'Items': ['/digest/latest/*', f'/digest/{date_str}/*']},
+                        'CallerReference': date_str,
+                    },
+                )
+                print(f"[digest] CloudFront invalidation created for {CF_DIST_ID}")
+            except Exception as e:
+                print(f"[digest] CF invalidation failed (non-fatal): {e}")
         for a in articles:
             table.update_item(
                 Key={'url': a['url']},
