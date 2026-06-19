@@ -21,6 +21,18 @@ help: ## Show available targets
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 # ── Lambda — local invocation ─────────────────────────────────────────────────
+.PHONY: show-candidates
+show-candidates: ## Show all relevant unserved articles and their summaries (local dev)
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=reeds-articles \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_ENDPOINT_URL=http://localstack:4566 \
+		crawler python show_candidates.py
+
 .PHONY: diagnose-author
 diagnose-author: ## Show DDB stats for an author. Usage: make diagnose-author AUTHOR="Simon Willison"
 	@test -n "$(AUTHOR)"         || { echo '❌  Usage: make diagnose-author AUTHOR="Author Name"'; exit 1; }
