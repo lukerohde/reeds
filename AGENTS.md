@@ -1,4 +1,4 @@
-# reeds — CLAUDE.md
+# reeds — AGENTS.md
 
 Daily blog digest at `reeds.lukeroh.de`. Crawls 10 tech RSS feeds, uses Claude to
 filter and summarise, renders a clean HTML digest page to S3/CloudFront daily.

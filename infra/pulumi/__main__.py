@@ -1,7 +1,7 @@
 """
 reeds — Daily digest site
 S3 + CloudFront front-end (via StaticSite component)
-DynamoDB table + two Lambda functions + EventBridge schedule
+DynamoDB table + three Lambda functions + EventBridge schedules
 
 DNS is resolved one of three ways (first match wins):
   1. reeds:parentIngressStack — Pulumi StackReference with a zone_id output
@@ -10,6 +10,11 @@ DNS is resolved one of three ways (first match wins):
                                 (you already have a zone, just give us the ID)
   3. (neither)                — a new Route53 zone is created; nameservers are
                                 exported so you can update your registrar
+
+Required env vars (set in .env or GitHub secrets):
+  ANTHROPIC_API_KEY  — Claude API key (digest Lambda)
+  GOOGLE_API_KEY     — Gemini API key (digest Lambda, for YouTube summarisation)
+  YOUTUBE_API_KEY    — YouTube Data API v3 key (youtube_crawler Lambda)
 """
 
 import os
@@ -143,13 +148,37 @@ digest = aws.lambda_.Function(
         "BUCKET_NAME":         site.bucket_name,
         "CF_DISTRIBUTION_ID":  site.distribution_id,
         "ANTHROPIC_API_KEY":   os.environ.get("ANTHROPIC_API_KEY", ""),
+        # TODO: set GOOGLE_API_KEY in .env / GitHub secrets to enable YouTube summarisation
+        "GOOGLE_API_KEY":      os.environ.get("GOOGLE_API_KEY", ""),
+    }),
+)
+
+# ── Lambda: youtube_crawler ───────────────────────────────────────────────────
+youtube_crawler_zip = _lambda_archive("../../backend/youtube_crawler", {"config.yaml": "../../config/config.yaml"})
+
+youtube_crawler = aws.lambda_.Function(
+    "youtube-crawler",
+    runtime="python3.12",
+    handler="handler.handler",
+    role=lambda_role.arn,
+    code=youtube_crawler_zip,
+    timeout=120,
+    environment=aws.lambda_.FunctionEnvironmentArgs(variables={
+        "DYNAMODB_TABLE":  table.name,
+        # TODO: set YOUTUBE_API_KEY in .env / GitHub secrets before enabling
+        "YOUTUBE_API_KEY": os.environ.get("YOUTUBE_API_KEY", ""),
     }),
 )
 
 # ── EventBridge schedules (5am AEST = 7pm UTC) ───────────────────────────────
+# crawler and youtube_crawler run together at 7pm UTC; digest runs 10 min later
 crawler_schedule = aws.cloudwatch.EventRule("crawler-schedule", schedule_expression="cron(0 19 * * ? *)")
 aws.cloudwatch.EventTarget("crawler-target", rule=crawler_schedule.name, arn=crawler.arn)
 aws.lambda_.Permission("crawler-permission", action="lambda:InvokeFunction", function=crawler.name, principal="events.amazonaws.com", source_arn=crawler_schedule.arn)
+
+youtube_crawler_schedule = aws.cloudwatch.EventRule("youtube-crawler-schedule", schedule_expression="cron(0 19 * * ? *)")
+aws.cloudwatch.EventTarget("youtube-crawler-target", rule=youtube_crawler_schedule.name, arn=youtube_crawler.arn)
+aws.lambda_.Permission("youtube-crawler-permission", action="lambda:InvokeFunction", function=youtube_crawler.name, principal="events.amazonaws.com", source_arn=youtube_crawler_schedule.arn)
 
 digest_schedule = aws.cloudwatch.EventRule("digest-schedule", schedule_expression="cron(10 19 * * ? *)")
 aws.cloudwatch.EventTarget("digest-target", rule=digest_schedule.name, arn=digest.arn)

@@ -7,11 +7,12 @@ Usage:
 
 import os
 import boto3
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Attr
 
 table = boto3.resource('dynamodb').Table(os.environ['DYNAMODB_TABLE'])
-today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+today = datetime.now(ZoneInfo('Australia/Melbourne')).strftime('%Y-%m-%d')
 
 items = table.scan(FilterExpression=Attr('served_date').eq(today))['Items']
 for item in items:

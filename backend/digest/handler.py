@@ -7,15 +7,27 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Attr
 
+try:
+    from google import genai as google_genai
+    from google.genai import types as genai_types
+except ImportError:
+    google_genai = None
+    genai_types  = None
+
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
 CANDIDATES_POOL  = _cfg['settings']['candidates_pool']
+MAX_PER_AUTHOR   = _cfg['settings'].get('max_per_author', 0)
 DIGEST_SIZE      = _cfg['settings']['digest_size']
 WORDS_PER_MINUTE = _cfg['settings']['words_per_minute']
 
-RELEVANCE_CHECK = _cfg['prompts']['relevance_check']
-SUMMARISE       = _cfg['prompts']['summarise']
-CURATE          = _cfg['prompts']['curate']
+RELEVANCE_CHECK   = _cfg['prompts']['relevance_check']
+SUMMARISE         = _cfg['prompts']['summarise']
+CURATE            = _cfg['prompts']['curate']
+YOUTUBE_SUMMARISE = _cfg['prompts'].get('youtube_summarise', '')
+
+GEMINI_MODEL  = 'gemini-2.0-flash'
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
@@ -31,6 +43,30 @@ cf       = boto3.client('cloudfront')
 ai       = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY', ''))
 
 TEMPLATE = (Path(__file__).parent / 'template.html').read_text()
+
+
+# ── Candidate selection ───────────────────────────────────────────────────────
+
+def select_candidates(unserved, pool_size=None, max_per_author=None):
+    """Return up to pool_size articles, capped at max_per_author each.
+
+    Defaults to the module-level config values. Override params are exposed for
+    testing without config dependency.
+    """
+    _pool = CANDIDATES_POOL if pool_size is None else pool_size
+    _cap  = MAX_PER_AUTHOR  if max_per_author is None else max_per_author
+    if not _cap:
+        return unserved[:_pool]
+    counts = {}
+    pool = []
+    for item in unserved:  # sorted by published_date desc
+        author = item.get('author', '')
+        if counts.get(author, 0) < _cap:
+            pool.append(item)
+            counts[author] = counts.get(author, 0) + 1
+        if len(pool) >= _pool:
+            break
+    return pool
 
 
 # ── Transform ─────────────────────────────────────────────────────────────────
@@ -53,11 +89,43 @@ def make_summary(title, author, content):
     return msg.content[0].text
 
 
+def make_youtube_summary(title, author, url):
+    # TODO: set GOOGLE_API_KEY in Lambda env vars (see infra/pulumi/__main__.py)
+    if not GOOGLE_API_KEY:
+        return '(YouTube summary unavailable — GOOGLE_API_KEY not set)'
+    if google_genai is None:
+        return '(YouTube summary unavailable — google-genai package not installed)'
+    client   = google_genai.Client(api_key=GOOGLE_API_KEY)
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[
+            genai_types.Part.from_uri(file_uri=url, mime_type='video/youtube'),
+            YOUTUBE_SUMMARISE.format(title=title, author=author),
+        ],
+    )
+    return response.text
+
+
 def transform(items):
     """Relevance-check and summarise unprocessed articles. Updates DDB in place."""
     for item in items:
         if item.get('status'):
             continue
+
+        if item.get('source') == 'youtube':
+            # YouTube channels are pre-approved by config; Gemini summarises from URL
+            summary = make_youtube_summary(item['title'], item['author'], item['url'])
+            item['status']  = 'relevant'
+            item['summary'] = summary
+            table.update_item(
+                Key={'url': item['url']},
+                UpdateExpression='SET #s = :s, summary = :m',
+                ExpressionAttributeNames={'#s': 'status'},
+                ExpressionAttributeValues={':s': 'relevant', ':m': summary},
+            )
+            print(f"  [youtube]  {item['author']}: {item['title']}")
+            continue
+
         content = item.get('content', '')
         if not is_relevant(item['title'], content):
             item['status'] = 'ignored'
@@ -164,7 +232,7 @@ def handler(event, context):
     print(f"[digest] {len(unserved)} unserved articles")
 
     # Transform: process unprocessed articles in the candidate pool
-    candidates_raw = unserved[:CANDIDATES_POOL]
+    candidates_raw = select_candidates(unserved)
     transform(candidates_raw)
 
     # Curate from relevant candidates

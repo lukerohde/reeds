@@ -1,3 +1,11 @@
+youtubers:
+  # TODO: replace channel_id values with real channel IDs before enabling
+  # Find a channel's ID at: https://www.youtube.com/@handle/about (copy from URL)
+  - name: Fireship
+    channel_id: UCsBjURrPoezykLs9EqgamOA
+  - name: Theo - t3.gg
+    channel_id: UCbRP3c757lWg9M-U7TyEkXA
+
 blogs:
   - author: Simon Willison
     url: https://simonwillison.net
@@ -33,8 +41,11 @@ blogs:
 settings:
   content_limit: 8000      # chars stored in DynamoDB per article
   candidates_pool: 20      # unserved articles to consider per digest run
+  max_per_author: 2        # max articles per author in the candidates pool (0 = no cap)
   digest_size: 10          # articles curated into the final digest
   words_per_minute: 200    # used to calculate read-time label
+  youtube_lookback_days: 7  # how far back to fetch videos per run
+  max_videos_per_channel: 3 # max new videos per channel per crawl
 
 prompts:
   relevance_check: |
@@ -65,3 +76,12 @@ prompts:
     Reply with only the selected URLs, one per line. No commentary.
 
     {articles}
+
+  youtube_summarise: |
+    Watch this YouTube video and extract the 2-3 most important technical insights
+    in the presenter's own words. Skip intros, sponsor segments, and generic hype —
+    focus on the core idea or technique. No introduction, no commentary, just the
+    substance.
+
+    Title: {title}
+    Channel: {author}

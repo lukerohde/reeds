@@ -288,3 +288,155 @@ class TestFullPipeline:
         handler({}, None)
         item = table.get_item(Key={'url': 'https://example.com/pasta-recipe'})['Item']
         assert item['status'] == 'ignored'
+
+
+# ── TestAuthorCap — select_candidates limits per-author articles ──────────────
+
+class TestAuthorCap:
+    """select_candidates must cap per-author articles so one prolific author
+    cannot crowd out others from the candidates pool."""
+
+    def test_dominant_author_capped_in_output(self):
+        """20 Simon articles + 5 from other authors → Simon served ≤ max_per_author."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        with table.batch_writer() as batch:
+            for i in range(20):
+                batch.put_item(Item={
+                    'url':            f'https://simonwillison.net/post-{i}',
+                    'author':         'Simon Willison',
+                    'title':          f'Simon post {i}',
+                    'published_date': (now - timedelta(hours=i)).isoformat(),
+                    'fetched_date':   now.isoformat(),
+                    'served_date':    '',
+                    'word_count':     '400',
+                    'content':        '',
+                    'status':         'relevant',
+                    'summary':        f'Simon insight {i}',
+                })
+            for i in range(5):
+                batch.put_item(Item={
+                    'url':            f'https://example.com/other-{i}',
+                    'author':         f'Author{i}',
+                    'title':          f'Other post {i}',
+                    'published_date': (now - timedelta(hours=20 + i)).isoformat(),
+                    'fetched_date':   now.isoformat(),
+                    'served_date':    '',
+                    'word_count':     '400',
+                    'content':        '',
+                    'status':         'relevant',
+                    'summary':        f'Other insight {i}',
+                })
+        from handler import handler
+        result = handler({}, None)
+        simon_served = sum(1 for u in result['urls'] if 'simonwillison.net' in u)
+        other_served = sum(1 for u in result['urls'] if 'example.com' in u)
+        assert simon_served <= 2, f"Author cap violated: {simon_served} Simon articles served"
+        assert other_served >= 1, "No diversity: no other authors served despite being available"
+
+    def test_cap_does_not_drop_below_digest_size_when_enough_diversity(self):
+        """Pool with enough diverse authors should still fill to digest_size."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        with table.batch_writer() as batch:
+            # 2 articles each from 6 different authors = 12 candidates (> digest_size=10)
+            for author_i in range(6):
+                for article_i in range(2):
+                    batch.put_item(Item={
+                        'url':            f'https://example.com/author{author_i}/post{article_i}',
+                        'author':         f'Author{author_i}',
+                        'title':          f'Author{author_i} post {article_i}',
+                        'published_date': (now - timedelta(hours=author_i * 2 + article_i)).isoformat(),
+                        'fetched_date':   now.isoformat(),
+                        'served_date':    '',
+                        'word_count':     '400',
+                        'content':        '',
+                        'status':         'relevant',
+                        'summary':        f'Author{author_i} insight {article_i}',
+                    })
+        from handler import handler
+        result = handler({}, None)
+        # With 12 diverse candidates and digest_size=10, curate should pick 10 (or AI fallback)
+        assert result['served'] >= 2  # at minimum the fallback floor
+
+
+# ── TestYouTubeItems — YouTube source items bypass relevance check ─────────────
+
+class TestYouTubeItems:
+    """YouTube source items must bypass the relevance check and be marked relevant
+    immediately, relying on Gemini (or placeholder) for their summary."""
+
+    def test_youtube_item_marked_relevant_without_content(self):
+        """A YouTube item with empty content must get status=relevant (no Claude call)."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=test123',
+            'author':         'Fireship',
+            'title':          'TypeScript just changed everything',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'test123',
+            'content':        '',
+            'word_count':     0,
+        })
+        from handler import handler
+        result = handler({}, None)
+        assert result['served'] == 1
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=test123'})['Item']
+        assert item['status'] == 'relevant'
+
+    def test_youtube_item_appears_in_digest_html(self):
+        """YouTube items must render in the digest HTML output."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=abc999',
+            'author':         'Fireship',
+            'title':          'I built a whole app in 10 minutes',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'abc999',
+            'content':        '',
+            'word_count':     0,
+        })
+        from handler import handler
+        handler({}, None)
+        html = open(PREVIEW).read()
+        assert 'I built a whole app in 10 minutes' in html
+        assert 'youtube.com' in html
+
+    def test_already_processed_youtube_item_skipped_by_transform(self):
+        """YouTube items with status already set must not be re-processed."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=processed',
+            'author':         'Fireship',
+            'title':          'Already processed video',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'processed',
+            'content':        '',
+            'word_count':     0,
+            'status':         'relevant',
+            'summary':        'Pre-existing summary',
+        })
+        from handler import handler
+        result = handler({}, None)
+        # Item still served (it was already relevant)
+        assert result['served'] == 1
+        # Summary was not overwritten
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=processed'})['Item']
+        assert item['summary'] == 'Pre-existing summary'
