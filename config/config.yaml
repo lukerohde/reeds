@@ -85,11 +85,6 @@ prompts:
 
     {text}
 
-  youtube_transcript: |
-    Extract the complete spoken transcript of this YouTube video.
-    Return only the spoken words — no timestamps, no speaker labels, no headers.
-    Just the raw transcript text, preserving the original wording.
-
   curate: |
     You are curating a daily reading digest for senior software engineers.
 

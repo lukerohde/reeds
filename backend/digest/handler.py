@@ -7,13 +7,6 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Attr
 
-try:
-    from google import genai as google_genai
-    from google.genai import types as genai_types
-except ImportError:
-    google_genai = None
-    genai_types  = None
-
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
 CANDIDATES_POOL          = _cfg['settings']['candidates_pool']
@@ -25,12 +18,7 @@ SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
 SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
 SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
-YOUTUBE_TRANSCRIPT    = _cfg['prompts'].get('youtube_transcript', '')
 CURATE                = _cfg['prompts']['curate']
-
-GEMINI_MODEL  = 'gemini-2.0-flash'
-# Accept GEMINI_API_KEY (preferred) or GOOGLE_API_KEY (fallback)
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY', '')
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
@@ -95,21 +83,6 @@ def make_summary(title, author, content, word_count=0):
     return msg.content[0].text
 
 
-def fetch_youtube_transcript(url):
-    """Step 1 of the YouTube pipeline: use Gemini to extract transcript text from a video URL."""
-    if not GEMINI_API_KEY or google_genai is None:
-        return None
-    client   = google_genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[
-            genai_types.Part.from_uri(file_uri=url, mime_type='video/youtube'),
-            YOUTUBE_TRANSCRIPT,
-        ],
-    )
-    return response.text
-
-
 def transform(items):
     """Relevance-check and summarise unprocessed articles. Updates DDB in place."""
     for item in items:
@@ -117,14 +90,10 @@ def transform(items):
             continue
 
         if item.get('source') == 'youtube':
-            # YouTube channels are pre-approved by config; no relevance check needed.
-            # Step 1: Gemini extracts transcript. Step 2: Claude summarises (same path as blogs).
-            transcript = fetch_youtube_transcript(item['url'])
-            if transcript:
-                wc      = len(transcript.split())
-                summary = make_summary(item['title'], item['author'], transcript, word_count=wc)
-            else:
-                summary = '(YouTube summary unavailable — GEMINI_API_KEY not set)'
+            # Channel list is curated — skip relevance check.
+            # Transcript was stored in content by youtube_crawler; summarise same as blog posts.
+            content = item.get('content', '')
+            summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
             item['status']  = 'relevant'
             item['summary'] = summary
             table.update_item(

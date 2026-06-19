@@ -292,7 +292,8 @@ build-lambdas: ## Install Lambda pip deps into backend/*/packages/ (auto-run by 
 	@test -d backend/crawler/packages/feedparser      || { echo "❌  build-lambdas: feedparser missing from crawler"; exit 1; }
 	@test -d backend/digest/packages/yaml             || { echo "❌  build-lambdas: yaml missing from digest"; exit 1; }
 	@test -d backend/digest/packages/anthropic        || { echo "❌  build-lambdas: anthropic missing from digest"; exit 1; }
-	@test -d backend/youtube_crawler/packages/googleapiclient || { echo "❌  build-lambdas: googleapiclient missing from youtube_crawler"; exit 1; }
+	@test -d backend/youtube_crawler/packages/googleapiclient          || { echo "❌  build-lambdas: googleapiclient missing from youtube_crawler"; exit 1; }
+	@test -d backend/youtube_crawler/packages/youtube_transcript_api  || { echo "❌  build-lambdas: youtube_transcript_api missing from youtube_crawler"; exit 1; }
 	@echo "✅  Lambda packages verified"
 
 .PHONY: infra-preview

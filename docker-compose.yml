@@ -41,8 +41,6 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:-}
       CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
 
   # ── YouTube Crawler Lambda — local invocation (make youtube-crawl) ────────────

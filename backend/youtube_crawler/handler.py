@@ -4,15 +4,16 @@ import boto3
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from googleapiclient.discovery import build
+from youtube_transcript_api import YouTubeTranscriptApi
 
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
-# TODO: add YOUTUBE_API_KEY to .env and Lambda env vars before enabling this handler
 YOUTUBE_API_KEY        = os.environ['YOUTUBE_API_KEY']
 TABLE_NAME             = os.environ['DYNAMODB_TABLE']
 YOUTUBERS              = _cfg.get('youtubers', [])
 LOOKBACK_DAYS          = _cfg['settings'].get('youtube_lookback_days', 7)
 MAX_VIDEOS_PER_CHANNEL = _cfg['settings'].get('max_videos_per_channel', 3)
+CONTENT_LIMIT          = _cfg['settings'].get('content_limit', 8000)
 
 dynamodb = boto3.resource('dynamodb')
 table    = dynamodb.Table(TABLE_NAME)
@@ -50,6 +51,15 @@ def get_recent_videos(youtube, channel_id, since):
     return videos
 
 
+def get_transcript(video_id):
+    """Fetch auto-generated or manual captions; return joined text or '' if unavailable."""
+    try:
+        snippets = YouTubeTranscriptApi().fetch(video_id)
+        return ' '.join(s.text for s in snippets)
+    except Exception:
+        return ''
+
+
 def handler(event, context):
     if not YOUTUBERS:
         print('[youtube_crawler] No youtubers configured — done')
@@ -75,6 +85,7 @@ def handler(event, context):
             if table.get_item(Key={'url': v['url']}).get('Item'):
                 print(f'  [skip]   {v["title"]}')
                 continue
+            transcript = get_transcript(v['video_id'])
             table.put_item(Item={
                 'url':            v['url'],
                 'author':         name,
@@ -84,8 +95,8 @@ def handler(event, context):
                 'served_date':    '',
                 'source':         'youtube',
                 'video_id':       v['video_id'],
-                'content':        '',
-                'word_count':     0,
+                'content':        transcript[:CONTENT_LIMIT],
+                'word_count':     len(transcript.split()) if transcript else 0,
             })
             print(f'  [stored] {v["title"]}')
             stored += 1

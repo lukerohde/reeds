@@ -15,7 +15,7 @@ os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock, call
 
-from handler import get_recent_videos
+from handler import get_recent_videos, get_transcript
 
 
 def _playlist_response(*videos):
@@ -115,6 +115,31 @@ class TestGetRecentVideos:
         assert 'new2' not in video_ids  # iteration halted at old video
 
 
+# ── TestGetTranscript ─────────────────────────────────────────────────────────
+
+class TestGetTranscript:
+    """get_transcript returns joined caption text, or '' when unavailable."""
+
+    def test_returns_joined_text(self):
+        mock_snippets = [MagicMock(text='Hello world'), MagicMock(text='This is great')]
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            mock_cls.return_value.fetch.return_value = mock_snippets
+            result = get_transcript('abc123')
+        assert result == 'Hello world This is great'
+
+    def test_returns_empty_when_transcript_unavailable(self):
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            mock_cls.return_value.fetch.side_effect = Exception('disabled')
+            result = get_transcript('vid')
+        assert result == ''
+
+    def test_passes_video_id_to_fetch(self):
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            mock_cls.return_value.fetch.return_value = []
+            get_transcript('myVideoId')
+        mock_cls.return_value.fetch.assert_called_once_with('myVideoId')
+
+
 # ── TestHandler ───────────────────────────────────────────────────────────────
 
 class TestHandler:
@@ -130,12 +155,13 @@ class TestHandler:
         recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         mock_table = MagicMock()
-        mock_table.get_item.return_value = {}  # not in DDB yet
+        mock_table.get_item.return_value = {}
 
         yt = _youtube_mock(_playlist_response(('New Video', 'vid999', recent)))
 
         with patch('handler.table', mock_table), \
              patch('handler.build', return_value=yt), \
+             patch('handler.get_transcript', return_value=''), \
              patch('handler.YOUTUBERS', [{'name': 'TestChannel', 'channel_id': 'UCtest'}]):
             from handler import handler
             result = handler({}, None)
@@ -144,10 +170,31 @@ class TestHandler:
         item = mock_table.put_item.call_args[1]['Item']
         assert item['source'] == 'youtube'
         assert item['served_date'] == ''
-        assert item['content'] == ''
         assert 'video_id' in item
         assert item['url'] == 'https://www.youtube.com/watch?v=vid999'
         assert item['author'] == 'TestChannel'
+
+    def test_stores_transcript_in_content(self):
+        """Handler fetches transcript and stores it in the content field."""
+        now    = datetime.now(timezone.utc)
+        recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {}
+
+        yt = _youtube_mock(_playlist_response(('Video with captions', 'vid_caps', recent)))
+
+        with patch('handler.table', mock_table), \
+             patch('handler.build', return_value=yt), \
+             patch('handler.get_transcript', return_value='This is the transcript.') as mock_gt, \
+             patch('handler.YOUTUBERS', [{'name': 'TestChannel', 'channel_id': 'UCtest'}]):
+            from handler import handler
+            handler({}, None)
+
+        mock_gt.assert_called_once_with('vid_caps')
+        item = mock_table.put_item.call_args[1]['Item']
+        assert item['content'] == 'This is the transcript.'
+        assert item['word_count'] == 4
 
     def test_skips_existing_videos(self):
         now    = datetime.now(timezone.utc)

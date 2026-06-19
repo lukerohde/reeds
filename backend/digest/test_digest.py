@@ -150,37 +150,6 @@ class TestBuildHtml:
         assert '2024-01-15' in html
 
 
-# ── TestFetchYoutubeTranscript ────────────────────────────────────────────────
-
-class TestFetchYoutubeTranscript:
-    """fetch_youtube_transcript returns transcript text via Gemini, or None if unavailable."""
-
-    def test_returns_none_without_gemini_key(self):
-        with patch.object(_h, 'GEMINI_API_KEY', ''):
-            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
-        assert result is None
-
-    def test_returns_none_when_genai_not_installed(self):
-        with patch.object(_h, 'GEMINI_API_KEY', 'fake-key'), \
-             patch.object(_h, 'google_genai', None):
-            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
-        assert result is None
-
-    def test_calls_gemini_and_returns_transcript(self):
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = MagicMock(text='Spoken transcript here.')
-        mock_genai = MagicMock()
-        mock_genai.Client.return_value = mock_client
-
-        with patch.object(_h, 'GEMINI_API_KEY', 'fake-key'), \
-             patch.object(_h, 'google_genai', mock_genai), \
-             patch.object(_h, 'genai_types', MagicMock()):
-            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
-
-        assert result == 'Spoken transcript here.'
-        mock_client.models.generate_content.assert_called_once()
-
-
 # ── TestMakeSummaryWordCount ──────────────────────────────────────────────────
 
 class TestMakeSummaryWordCount:

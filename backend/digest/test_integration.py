@@ -367,7 +367,7 @@ class TestAuthorCap:
 
 class TestYouTubeItems:
     """YouTube source items must bypass the relevance check and be marked relevant
-    immediately, relying on Gemini (or placeholder) for their summary."""
+    immediately. Transcript is stored in content by the youtube_crawler."""
 
     def test_youtube_item_marked_relevant_without_content(self):
         """A YouTube item with empty content must get status=relevant (no Claude call)."""
@@ -443,77 +443,67 @@ class TestYouTubeItems:
         assert item['summary'] == 'Pre-existing summary'
 
 
-# ── TestYouTubeTranscriptPipeline — two-step Gemini→Claude pipeline ───────────
+# ── TestYouTubeWithContent — transcript stored by crawler, summarised by digest ─
 
-class TestYouTubeTranscriptPipeline:
-    """YouTube summarisation uses two steps: Gemini extracts transcript → Claude summarises.
-
-    fetch_youtube_transcript() extracts the spoken text via Gemini.
-    make_summary() then summarises that transcript using Claude.
-    This matches the blog post pattern and keeps all Claude summarisation logic
-    in one place, with word_count-based prompt selection working for videos too.
+class TestYouTubeWithContent:
+    """Transcript is extracted by youtube_crawler (stored in content); digest uses
+    the same make_summary() path as blog posts — no Gemini in the digest at all.
     """
 
-    def test_transcript_is_passed_to_make_summary(self):
-        """Transcript from fetch_youtube_transcript is fed to make_summary as content."""
-        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
-        table = ddb.Table(TABLE)
-        now   = datetime.now(timezone.utc)
+    def test_youtube_item_with_content_gets_claude_summary(self):
+        """A YouTube item with a transcript in content gets make_summary called with it."""
+        ddb        = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table      = ddb.Table(TABLE)
+        now        = datetime.now(timezone.utc)
+        transcript = 'TypeScript generics unlock composable abstractions. Here is how it works.'
         table.put_item(Item={
-            'url':            'https://www.youtube.com/watch?v=twostep01',
+            'url':            'https://www.youtube.com/watch?v=withcontent',
             'author':         'Fireship',
-            'title':          'Two-step pipeline test video',
+            'title':          'TypeScript generics explained',
             'published_date': now.isoformat(),
             'fetched_date':   now.isoformat(),
             'served_date':    '',
             'source':         'youtube',
-            'video_id':       'twostep01',
-            'content':        '',
-            'word_count':     0,
+            'video_id':       'withcontent',
+            'content':        transcript,
+            'word_count':     len(transcript.split()),
         })
 
-        fake_transcript = 'The key insight is dependency injection unlocks composable abstractions.'
-
         import handler as h
-        with patch.object(h, 'fetch_youtube_transcript', return_value=fake_transcript) as mock_fetch, \
-             patch.object(h, 'make_summary', return_value='Distilled Claude summary.') as mock_summary:
+        with patch.object(h, 'make_summary', return_value='Claude summary.') as mock_summary:
             from handler import handler
             result = handler({}, None)
 
         assert result['served'] == 1
-        mock_fetch.assert_called_once_with('https://www.youtube.com/watch?v=twostep01')
         mock_summary.assert_called_once()
         args, _ = mock_summary.call_args
-        assert args[2] == fake_transcript, (
-            f"Transcript not passed as content arg. Got: {mock_summary.call_args}"
-        )
+        assert args[2] == transcript, f"Expected transcript as content arg. Got: {args}"
 
-    def test_claude_not_called_when_no_transcript(self):
-        """If Gemini returns None (no key), Claude is not called; placeholder summary used."""
+    def test_youtube_item_without_content_served_without_claude_call(self):
+        """If no transcript is available (empty content), item is still served; Claude not called."""
         ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
         table = ddb.Table(TABLE)
         now   = datetime.now(timezone.utc)
         table.put_item(Item={
-            'url':            'https://www.youtube.com/watch?v=nokey99',
+            'url':            'https://www.youtube.com/watch?v=nocaptions',
             'author':         'Fireship',
-            'title':          'No-key video',
+            'title':          'Video without captions',
             'published_date': now.isoformat(),
             'fetched_date':   now.isoformat(),
             'served_date':    '',
             'source':         'youtube',
-            'video_id':       'nokey99',
+            'video_id':       'nocaptions',
             'content':        '',
             'word_count':     0,
         })
 
         import handler as h
-        with patch.object(h, 'fetch_youtube_transcript', return_value=None), \
-             patch.object(h, 'make_summary') as mock_summary:
+        with patch.object(h, 'make_summary') as mock_summary:
             from handler import handler
             result = handler({}, None)
 
         assert result['served'] == 1
         mock_summary.assert_not_called()
-        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=nokey99'})['Item']
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=nocaptions'})['Item']
         assert item['status'] == 'relevant'
-        assert 'unavailable' in item['summary'].lower()
+        assert item['summary'] == ''
