@@ -188,7 +188,7 @@ The digest Lambda uses Gemini (not Claude) to summarise YouTube videos directly 
 
 **Required API keys (beyond `ANTHROPIC_API_KEY`):**
 - `YOUTUBE_API_KEY` — YouTube Data API v3 key (for `youtube_crawler` Lambda)
-- `GOOGLE_API_KEY` — Gemini API key (for `digest` Lambda, YouTube summarisation)
+- `GEMINI_API_KEY` — Gemini API key (for `digest` Lambda, YouTube summarisation)
 
 Add both to `.env` and as GitHub secrets. See `infra/pulumi/__main__.py` for where they're
 injected into Lambda env vars.
@@ -205,7 +205,7 @@ injected into Lambda env vars.
 make local-youtube-crawl   # → LocalStack DynamoDB
 
 # Digest handles YouTube items automatically if GOOGLE_API_KEY is set
-make dev                   # picks up YouTube items from LocalStack alongside blog articles
+make dev                   # picks up YouTube items; GEMINI_API_KEY needed for real summaries
 ```
 
 **DynamoDB schema additions for YouTube items:**

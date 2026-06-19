@@ -27,7 +27,8 @@ CURATE            = _cfg['prompts']['curate']
 YOUTUBE_SUMMARISE = _cfg['prompts'].get('youtube_summarise', '')
 
 GEMINI_MODEL  = 'gemini-2.0-flash'
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
+# Accept GEMINI_API_KEY (preferred) or GOOGLE_API_KEY (fallback)
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY', '')
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
@@ -90,12 +91,12 @@ def make_summary(title, author, content):
 
 
 def make_youtube_summary(title, author, url):
-    # TODO: set GOOGLE_API_KEY in Lambda env vars (see infra/pulumi/__main__.py)
-    if not GOOGLE_API_KEY:
-        return '(YouTube summary unavailable — GOOGLE_API_KEY not set)'
+    # TODO: set GEMINI_API_KEY in Lambda env vars (see infra/pulumi/__main__.py)
+    if not GEMINI_API_KEY:
+        return '(YouTube summary unavailable — GEMINI_API_KEY not set)'
     if google_genai is None:
         return '(YouTube summary unavailable — google-genai package not installed)'
-    client   = google_genai.Client(api_key=GOOGLE_API_KEY)
+    client   = google_genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[

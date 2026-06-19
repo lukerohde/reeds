@@ -13,7 +13,7 @@ DNS is resolved one of three ways (first match wins):
 
 Required env vars (set in .env or GitHub secrets):
   ANTHROPIC_API_KEY  — Claude API key (digest Lambda)
-  GOOGLE_API_KEY     — Gemini API key (digest Lambda, for YouTube summarisation)
+  GEMINI_API_KEY     — Gemini API key (digest Lambda, for YouTube summarisation)
   YOUTUBE_API_KEY    — YouTube Data API v3 key (youtube_crawler Lambda)
 """
 
@@ -148,8 +148,8 @@ digest = aws.lambda_.Function(
         "BUCKET_NAME":         site.bucket_name,
         "CF_DISTRIBUTION_ID":  site.distribution_id,
         "ANTHROPIC_API_KEY":   os.environ.get("ANTHROPIC_API_KEY", ""),
-        # TODO: set GOOGLE_API_KEY in .env / GitHub secrets to enable YouTube summarisation
-        "GOOGLE_API_KEY":      os.environ.get("GOOGLE_API_KEY", ""),
+        # TODO: set GEMINI_API_KEY in .env / GitHub secrets to enable YouTube summarisation
+        "GEMINI_API_KEY":      os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", ""),
     }),
 )
 

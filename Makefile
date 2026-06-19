@@ -141,7 +141,7 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		-e DYNAMODB_TABLE=reeds-articles \
 		-e BUCKET_NAME=reeds-local \
 		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-		-e GOOGLE_API_KEY=$(GOOGLE_API_KEY) \
+		-e GEMINI_API_KEY=$(GEMINI_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
