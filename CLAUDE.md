@@ -35,7 +35,8 @@ All AI cost sits in the digest Lambda.
 Everything tuneable lives in `config/config.yaml`:
 - **blogs** — list of `{author, url, feed}` entries
 - **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`, `words_per_minute`
-- **prompts** — `relevance_check`, `summarise`, `curate`
+- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `youtube_transcript`, `curate`
+- **settings** — includes `summarise_long_threshold` (default 500 words)
 
 `max_per_author` caps how many articles a single author can contribute to the candidates pool.
 Without it, prolific authors (e.g. Simon Willison posts many times daily) dominate the pool and
@@ -59,7 +60,8 @@ To add a blog: `/add-blog` (discovers feed, verifies, updates config, commits, p
 
 ```bash
 make crawl          # fetch RSS feeds + article content → real DynamoDB
-make youtube-crawl  # fetch YouTube videos → real DynamoDB (needs YOUTUBE_API_KEY)
+make youtube-crawl       # fetch YouTube videos → real DynamoDB (needs YOUTUBE_API_KEY)
+make test-youtube-fetch  # print recent videos per channel, no DDB writes (needs YOUTUBE_API_KEY)
 make digest         # transform + curate → HTML → real S3
 make redigest       # reset today's articles and re-run digest
 make reset-today    # unserve today's articles so digest can be re-run

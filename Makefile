@@ -74,6 +74,17 @@ test-youtube: ## Run YouTube crawler unit tests only (no DynamoDB)
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		youtube_crawler python -m pytest test_handler.py -v
 
+.PHONY: test-youtube-fetch
+test-youtube-fetch: ## Fetch recent videos for each channel and print them (no DDB writes). Needs YOUTUBE_API_KEY.
+	@test -n "$(YOUTUBE_API_KEY)" || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
+	@docker compose run --rm \
+		-e YOUTUBE_API_KEY=$(YOUTUBE_API_KEY) \
+		-e DYNAMODB_TABLE=test-dummy \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		youtube_crawler python fetch_test.py
+
 .PHONY: crawl
 crawl: ## Run crawler Lambda locally (RSS feeds → DynamoDB)
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }

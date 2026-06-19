@@ -19,6 +19,7 @@ import os
 import pytest
 import boto3
 from datetime import datetime, timezone, timedelta
+from unittest.mock import patch
 
 ENDPOINT = os.environ.get('AWS_ENDPOINT_URL', 'http://localstack:4566')
 TABLE    = os.environ.get('DYNAMODB_TABLE', 'reeds-articles')
@@ -440,3 +441,79 @@ class TestYouTubeItems:
         # Summary was not overwritten
         item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=processed'})['Item']
         assert item['summary'] == 'Pre-existing summary'
+
+
+# ── TestYouTubeTranscriptPipeline — two-step Gemini→Claude pipeline ───────────
+
+class TestYouTubeTranscriptPipeline:
+    """YouTube summarisation uses two steps: Gemini extracts transcript → Claude summarises.
+
+    fetch_youtube_transcript() extracts the spoken text via Gemini.
+    make_summary() then summarises that transcript using Claude.
+    This matches the blog post pattern and keeps all Claude summarisation logic
+    in one place, with word_count-based prompt selection working for videos too.
+    """
+
+    def test_transcript_is_passed_to_make_summary(self):
+        """Transcript from fetch_youtube_transcript is fed to make_summary as content."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=twostep01',
+            'author':         'Fireship',
+            'title':          'Two-step pipeline test video',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'twostep01',
+            'content':        '',
+            'word_count':     0,
+        })
+
+        fake_transcript = 'The key insight is dependency injection unlocks composable abstractions.'
+
+        import handler as h
+        with patch.object(h, 'fetch_youtube_transcript', return_value=fake_transcript) as mock_fetch, \
+             patch.object(h, 'make_summary', return_value='Distilled Claude summary.') as mock_summary:
+            from handler import handler
+            result = handler({}, None)
+
+        assert result['served'] == 1
+        mock_fetch.assert_called_once_with('https://www.youtube.com/watch?v=twostep01')
+        mock_summary.assert_called_once()
+        args, _ = mock_summary.call_args
+        assert args[2] == fake_transcript, (
+            f"Transcript not passed as content arg. Got: {mock_summary.call_args}"
+        )
+
+    def test_claude_not_called_when_no_transcript(self):
+        """If Gemini returns None (no key), Claude is not called; placeholder summary used."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=nokey99',
+            'author':         'Fireship',
+            'title':          'No-key video',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'nokey99',
+            'content':        '',
+            'word_count':     0,
+        })
+
+        import handler as h
+        with patch.object(h, 'fetch_youtube_transcript', return_value=None), \
+             patch.object(h, 'make_summary') as mock_summary:
+            from handler import handler
+            result = handler({}, None)
+
+        assert result['served'] == 1
+        mock_summary.assert_not_called()
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=nokey99'})['Item']
+        assert item['status'] == 'relevant'
+        assert 'unavailable' in item['summary'].lower()

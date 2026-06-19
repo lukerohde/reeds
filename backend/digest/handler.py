@@ -16,15 +16,17 @@ except ImportError:
 
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
-CANDIDATES_POOL  = _cfg['settings']['candidates_pool']
-MAX_PER_AUTHOR   = _cfg['settings'].get('max_per_author', 0)
-DIGEST_SIZE      = _cfg['settings']['digest_size']
-WORDS_PER_MINUTE = _cfg['settings']['words_per_minute']
+CANDIDATES_POOL          = _cfg['settings']['candidates_pool']
+MAX_PER_AUTHOR           = _cfg['settings'].get('max_per_author', 0)
+DIGEST_SIZE              = _cfg['settings']['digest_size']
+WORDS_PER_MINUTE         = _cfg['settings']['words_per_minute']
+SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 
-RELEVANCE_CHECK   = _cfg['prompts']['relevance_check']
-SUMMARISE         = _cfg['prompts']['summarise']
-CURATE            = _cfg['prompts']['curate']
-YOUTUBE_SUMMARISE = _cfg['prompts'].get('youtube_summarise', '')
+RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
+SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
+SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
+YOUTUBE_TRANSCRIPT    = _cfg['prompts'].get('youtube_transcript', '')
+CURATE                = _cfg['prompts']['curate']
 
 GEMINI_MODEL  = 'gemini-2.0-flash'
 # Accept GEMINI_API_KEY (preferred) or GOOGLE_API_KEY (fallback)
@@ -81,27 +83,28 @@ def is_relevant(title, content):
     return msg.content[0].text.strip().lower().startswith('y')
 
 
-def make_summary(title, author, content):
-    msg = ai.messages.create(
+def make_summary(title, author, content, word_count=0):
+    """Summarise content via Claude. Short articles get verbatim excerpt; long ones get TLDR."""
+    wc     = int(word_count or 0)
+    prompt = SUMMARISE_LONG if wc >= SUMMARISE_LONG_THRESHOLD else SUMMARISE_SHORT
+    msg    = ai.messages.create(
         model='claude-sonnet-4-6',
         max_tokens=200,
-        messages=[{'role': 'user', 'content': SUMMARISE.format(title=title, author=author, text=content)}],
+        messages=[{'role': 'user', 'content': prompt.format(title=title, author=author, text=content)}],
     )
     return msg.content[0].text
 
 
-def make_youtube_summary(title, author, url):
-    # TODO: set GEMINI_API_KEY in Lambda env vars (see infra/pulumi/__main__.py)
-    if not GEMINI_API_KEY:
-        return '(YouTube summary unavailable — GEMINI_API_KEY not set)'
-    if google_genai is None:
-        return '(YouTube summary unavailable — google-genai package not installed)'
+def fetch_youtube_transcript(url):
+    """Step 1 of the YouTube pipeline: use Gemini to extract transcript text from a video URL."""
+    if not GEMINI_API_KEY or google_genai is None:
+        return None
     client   = google_genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[
             genai_types.Part.from_uri(file_uri=url, mime_type='video/youtube'),
-            YOUTUBE_SUMMARISE.format(title=title, author=author),
+            YOUTUBE_TRANSCRIPT,
         ],
     )
     return response.text
@@ -114,8 +117,14 @@ def transform(items):
             continue
 
         if item.get('source') == 'youtube':
-            # YouTube channels are pre-approved by config; Gemini summarises from URL
-            summary = make_youtube_summary(item['title'], item['author'], item['url'])
+            # YouTube channels are pre-approved by config; no relevance check needed.
+            # Step 1: Gemini extracts transcript. Step 2: Claude summarises (same path as blogs).
+            transcript = fetch_youtube_transcript(item['url'])
+            if transcript:
+                wc      = len(transcript.split())
+                summary = make_summary(item['title'], item['author'], transcript, word_count=wc)
+            else:
+                summary = '(YouTube summary unavailable — GEMINI_API_KEY not set)'
             item['status']  = 'relevant'
             item['summary'] = summary
             table.update_item(
@@ -139,7 +148,7 @@ def transform(items):
             print(f"  [ignored]  {item['author']}: {item['title']}")
             continue
 
-        summary = make_summary(item['title'], item['author'], content) if content else ''
+        summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
         item['status']  = 'relevant'
         item['summary'] = summary
         table.update_item(

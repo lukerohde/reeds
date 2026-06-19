@@ -1,10 +1,16 @@
 youtubers:
-  # TODO: replace channel_id values with real channel IDs before enabling
+  # Verify channel IDs with: make test-youtube-fetch
   # Find a channel's ID at: https://www.youtube.com/@handle/about (copy from URL)
   - name: Fireship
     channel_id: UCsBjURrPoezykLs9EqgamOA
   - name: Theo - t3.gg
     channel_id: UCbRP3c757lWg9M-U7TyEkXA
+  - name: Andrej Karpathy
+    channel_id: UCXUPKJO5MZQN11PqgIvyuvQ
+  - name: Yannic Kilcher
+    channel_id: UCZHmQk67mSJgfCCTn7xBfew
+  - name: Two Minute Papers
+    channel_id: UCbfYPyITQ-7l4upoX8nvctg
 
 blogs:
   - author: Simon Willison
@@ -39,13 +45,14 @@ blogs:
     feed: https://bcantrill.dtrace.org/index.xml
 
 settings:
-  content_limit: 8000      # chars stored in DynamoDB per article
-  candidates_pool: 20      # unserved articles to consider per digest run
-  max_per_author: 2        # max articles per author in the candidates pool (0 = no cap)
-  digest_size: 10          # articles curated into the final digest
-  words_per_minute: 200    # used to calculate read-time label
-  youtube_lookback_days: 7  # how far back to fetch videos per run
-  max_videos_per_channel: 3 # max new videos per channel per crawl
+  content_limit: 8000           # chars stored in DynamoDB per article
+  candidates_pool: 20           # unserved articles to consider per digest run
+  max_per_author: 2             # max articles per author in the candidates pool (0 = no cap)
+  digest_size: 10               # articles curated into the final digest
+  words_per_minute: 200         # used to calculate read-time label
+  youtube_lookback_days: 7      # how far back to fetch videos per run
+  max_videos_per_channel: 3     # max new videos per channel per crawl
+  summarise_long_threshold: 500 # word count at/above which TLDR approach is used
 
 prompts:
   relevance_check: |
@@ -57,7 +64,7 @@ prompts:
     Title: {title}
     Preview: {preview}
 
-  summarise: |
+  summarise_short: |
     Extract the 2-3 most important sentences from this article, quoted verbatim
     from the text. Ignore navigation, ads, and boilerplate — only return the core idea
     in the author's own words. No introduction, no commentary, just the sentences.
@@ -66,6 +73,22 @@ prompts:
     Author: {author}
 
     {text}
+
+  summarise_long: |
+    You are summarising a long article for a senior software engineer's daily digest.
+    Write a TLDR: distil the single most important insight in 2-3 sentences.
+    Use your own words. Be direct and specific — skip the setup, get to the point.
+    No fluff, no "the author discusses" — just the substance.
+
+    Title: {title}
+    Author: {author}
+
+    {text}
+
+  youtube_transcript: |
+    Extract the complete spoken transcript of this YouTube video.
+    Return only the spoken words — no timestamps, no speaker labels, no headers.
+    Just the raw transcript text, preserving the original wording.
 
   curate: |
     You are curating a daily reading digest for senior software engineers.
@@ -76,12 +99,3 @@ prompts:
     Reply with only the selected URLs, one per line. No commentary.
 
     {articles}
-
-  youtube_summarise: |
-    Watch this YouTube video and extract the 2-3 most important technical insights
-    in the presenter's own words. Skip intros, sponsor segments, and generic hype —
-    focus on the core idea or technique. No introduction, no commentary, just the
-    substance.
-
-    Title: {title}
-    Channel: {author}

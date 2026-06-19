@@ -184,34 +184,45 @@ if you're getting confusing connection errors.
 
 YouTube videos enter the same DynamoDB table as blog articles, with `source: 'youtube'`.
 The `youtube_crawler` Lambda fetches recent videos from curated channels via the YouTube Data API v3.
-The digest Lambda uses Gemini (not Claude) to summarise YouTube videos directly from their URL.
+The digest Lambda uses a two-step pipeline: Gemini extracts the transcript, then Claude summarises it
+(same `make_summary()` path as blog posts, with word-count-based prompt selection).
 
 **Required API keys (beyond `ANTHROPIC_API_KEY`):**
 - `YOUTUBE_API_KEY` — YouTube Data API v3 key (for `youtube_crawler` Lambda)
-- `GEMINI_API_KEY` — Gemini API key (for `digest` Lambda, YouTube summarisation)
+- `GEMINI_API_KEY` — Gemini API key (for `digest` Lambda, transcript extraction only)
 
 Add both to `.env` and as GitHub secrets. See `infra/pulumi/__main__.py` for where they're
 injected into Lambda env vars.
 
+**YouTube summarisation pipeline:**
+1. `fetch_youtube_transcript(url)` — Gemini reads video, returns spoken transcript text (or None if no key)
+2. `make_summary(title, author, transcript, word_count=len(transcript.split()))` — Claude summarises
+
+Without `GEMINI_API_KEY`, YouTube items get a placeholder summary but are still served.
+YouTube items skip the relevance check — channel list is manually curated.
+
 **Config fields (in `config/config.yaml`):**
-- `youtubers` — list of `{name, channel_id}` entries
+- `youtubers` — list of `{name, channel_id}` entries (verify IDs with `make test-youtube-fetch`)
 - `settings.youtube_lookback_days` — how far back to fetch videos per run (default: 7)
 - `settings.max_videos_per_channel` — max new videos per channel per crawl (default: 3)
-- `prompts.youtube_summarise` — Gemini prompt for video summarisation
+- `settings.summarise_long_threshold` — word count above which TLDR prompt is used (default: 500)
+- `prompts.youtube_transcript` — Gemini prompt to extract spoken transcript
+- `prompts.summarise_short` / `prompts.summarise_long` — Claude prompts for short/long content
 
 **Local dev:**
 ```bash
 # YouTube crawling needs a real YOUTUBE_API_KEY (read-only, free quota)
 make local-youtube-crawl   # → LocalStack DynamoDB
+make test-youtube-fetch    # print what videos exist for each channel (no DDB writes)
 
-# Digest handles YouTube items automatically if GOOGLE_API_KEY is set
-make dev                   # picks up YouTube items; GEMINI_API_KEY needed for real summaries
+# Digest handles YouTube items automatically if GEMINI_API_KEY is set
+make dev                   # picks up YouTube items; GEMINI_API_KEY + ANTHROPIC_API_KEY needed
 ```
 
 **DynamoDB schema additions for YouTube items:**
 - `source: 'youtube'` — distinguishes from blog articles
 - `video_id` — YouTube video ID (e.g. `dQw4w9WgXcQ`)
-- `content: ''` — always empty; Gemini reads from URL at summarisation time
+- `content: ''` — always empty; Gemini reads video from URL at transcript-extraction time
 
 ## CI/CD
 

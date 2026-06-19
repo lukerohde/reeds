@@ -5,6 +5,7 @@ Run via:
     make test-digest
 """
 import os
+from unittest.mock import patch, MagicMock
 
 # Set env vars before importing the handler so module-level assignments don't KeyError
 os.environ.setdefault('DYNAMODB_TABLE', 'test-table')
@@ -13,6 +14,7 @@ os.environ.setdefault('AWS_DEFAULT_REGION', 'eu-west-1')
 os.environ.setdefault('AWS_ACCESS_KEY_ID', 'test')
 os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
 
+import handler as _h
 from handler import select_candidates, read_time_label, build_html
 
 
@@ -146,3 +148,73 @@ class TestBuildHtml:
     def test_heading_contains_date(self):
         html = build_html([self._article], '2024-01-15', None)
         assert '2024-01-15' in html
+
+
+# ── TestFetchYoutubeTranscript ────────────────────────────────────────────────
+
+class TestFetchYoutubeTranscript:
+    """fetch_youtube_transcript returns transcript text via Gemini, or None if unavailable."""
+
+    def test_returns_none_without_gemini_key(self):
+        with patch.object(_h, 'GEMINI_API_KEY', ''):
+            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
+        assert result is None
+
+    def test_returns_none_when_genai_not_installed(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'fake-key'), \
+             patch.object(_h, 'google_genai', None):
+            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
+        assert result is None
+
+    def test_calls_gemini_and_returns_transcript(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = MagicMock(text='Spoken transcript here.')
+        mock_genai = MagicMock()
+        mock_genai.Client.return_value = mock_client
+
+        with patch.object(_h, 'GEMINI_API_KEY', 'fake-key'), \
+             patch.object(_h, 'google_genai', mock_genai), \
+             patch.object(_h, 'genai_types', MagicMock()):
+            result = _h.fetch_youtube_transcript('https://youtube.com/watch?v=abc')
+
+        assert result == 'Spoken transcript here.'
+        mock_client.models.generate_content.assert_called_once()
+
+
+# ── TestMakeSummaryWordCount ──────────────────────────────────────────────────
+
+class TestMakeSummaryWordCount:
+    """make_summary selects verbatim/excerpt for short articles, TLDR for long ones."""
+
+    def _mock_response(self, text):
+        resp = MagicMock()
+        resp.content = [MagicMock(text=text)]
+        return resp
+
+    def test_short_content_prompt_uses_verbatim_approach(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('Excerpt.')
+            _h.make_summary('Title', 'Author', 'Short article.', word_count=100)
+        content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
+        assert 'verbatim' in content.lower() or 'excerpt' in content.lower()
+
+    def test_long_content_prompt_uses_tldr_approach(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('TLDR.')
+            _h.make_summary('Title', 'Author', 'Long article. ' * 100, word_count=600)
+        content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
+        assert any(w in content.lower() for w in ('tldr', 'distil', 'distill', 'insight'))
+
+    def test_missing_word_count_defaults_to_short_approach(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('Summary.')
+            _h.make_summary('Title', 'Author', 'Content.')
+        content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
+        assert 'verbatim' in content.lower() or 'excerpt' in content.lower()
+
+    def test_exactly_at_threshold_uses_long_approach(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('TLDR.')
+            _h.make_summary('Title', 'Author', 'Content', word_count=_h.SUMMARISE_LONG_THRESHOLD)
+        content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
+        assert any(w in content.lower() for w in ('tldr', 'distil', 'distill', 'insight'))
