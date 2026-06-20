@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 [`AGENTS.md`](AGENTS.md) is the single source of truth for this project —
-architecture, config, the ETL pipeline, YouTube integration, Lambda packaging,
-testing, deployment, and cost. **Read it first.**
+architecture, config, the ETL pipeline, pluggable sources (blogs + YouTube),
+Lambda packaging, testing, deployment, and cost. **Read it first.**
 
 This file exists only to point Claude Code at that guide and to index the
 project's slash commands.
