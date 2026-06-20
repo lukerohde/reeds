@@ -1,6 +1,8 @@
 import os
+import re
 import yaml
 import boto3
+import requests
 import anthropic
 from pathlib import Path
 from datetime import datetime, timezone
@@ -19,6 +21,10 @@ RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
 SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
 SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
 CURATE                = _cfg['prompts']['curate']
+
+GEMINI_API_KEY  = os.environ.get('GOOGLE_API_KEY', '')
+YOUTUBE_SUMMARISE = _cfg['prompts'].get('youtube_summarise', '')
+GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
@@ -83,29 +89,47 @@ def make_summary(title, author, content, word_count=0):
     return msg.content[0].text
 
 
+def gemini_summarise_video(url):
+    """Summarise a YouTube video via Gemini for videos where no transcript is available."""
+    if not GEMINI_API_KEY or not YOUTUBE_SUMMARISE:
+        return ''
+    try:
+        body = {
+            'contents': [{
+                'parts': [
+                    {'fileData': {'fileUri': url}},
+                    {'text': YOUTUBE_SUMMARISE},
+                ]
+            }]
+        }
+        r = requests.post(
+            GEMINI_ENDPOINT, json=body,
+            headers={'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        print(f'  [gemini] failed for {url}: {type(e).__name__}: {e}')
+        return ''
+
+
 def transform(items):
     """Relevance-check and summarise unprocessed articles. Updates DDB in place."""
     for item in items:
         if item.get('status'):
             continue
 
-        if item.get('source') == 'youtube':
-            # Channel list is curated — skip relevance check.
-            # Transcript was stored in content by youtube_crawler; summarise same as blog posts.
-            content = item.get('content', '')
-            summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
-            item['status']  = 'relevant'
-            item['summary'] = summary
-            table.update_item(
-                Key={'url': item['url']},
-                UpdateExpression='SET #s = :s, summary = :m',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={':s': 'relevant', ':m': summary},
-            )
-            print(f"  [youtube]  {item['author']}: {item['title']}")
-            continue
+        content       = item.get('content', '')
+        ready_summary = None  # set when content IS already a summary (Gemini path)
 
-        content = item.get('content', '')
+        # YouTube items without a transcript: Gemini summarises from the URL directly.
+        # Its output is used as both the relevance signal and the stored summary —
+        # no second make_summary call needed.
+        if item.get('source') == 'youtube' and not content:
+            ready_summary = gemini_summarise_video(item['url'])
+            content       = ready_summary  # use as relevance signal
+
         if not is_relevant(item['title'], content):
             item['status'] = 'ignored'
             table.update_item(
@@ -117,7 +141,9 @@ def transform(items):
             print(f"  [ignored]  {item['author']}: {item['title']}")
             continue
 
-        summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
+        summary = ready_summary if ready_summary is not None else (
+            make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
+        )
         item['status']  = 'relevant'
         item['summary'] = summary
         table.update_item(
@@ -173,6 +199,13 @@ def prev_digest_date(current_date_str):
         return None
 
 
+def _md_to_html(text):
+    """Convert bold/italic markdown to HTML so summaries render correctly."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'<em>\1</em>', text)
+    return text
+
+
 def build_html(articles, date_str, prev_date_str):
     items_html = ''
     for a in articles:
@@ -185,7 +218,7 @@ def build_html(articles, date_str, prev_date_str):
     <article>
       <h2><a href="{a['url']}">{a['title']}</a></h2>
       <p class="meta">{meta}</p>
-      <p class="summary">{a.get('summary', '')}</p>
+      <p class="summary">{_md_to_html(a.get('summary', ''))}</p>
     </article>"""
 
     prev_link = (

@@ -149,6 +149,68 @@ class TestBuildHtml:
         html = build_html([self._article], '2024-01-15', None)
         assert '2024-01-15' in html
 
+    def test_bold_markdown_rendered_as_strong(self):
+        article = {**self._article, 'summary': '**TLDR:** Key insight here.'}
+        html = build_html([article], '2024-01-15', None)
+        assert '<strong>TLDR:</strong>' in html
+        assert '**TLDR:**' not in html
+
+    def test_italic_markdown_rendered_as_em(self):
+        article = {**self._article, 'summary': 'Something *important* here.'}
+        html = build_html([article], '2024-01-15', None)
+        assert '<em>important</em>' in html
+        assert '*important*' not in html
+
+
+# ── TestGeminiSummariseVideo ──────────────────────────────────────────────────
+
+class TestGeminiSummariseVideo:
+    """gemini_summarise_video returns a summary from the Gemini API or '' on failure."""
+
+    def _ok_response(self, text):
+        mock = MagicMock()
+        mock.ok = True
+        mock.raise_for_status.return_value = None
+        mock.json.return_value = {
+            'candidates': [{'content': {'parts': [{'text': text}]}}]
+        }
+        return mock
+
+    def test_returns_summary_on_success(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch('handler.requests.post', return_value=self._ok_response('Rust rewrite summary.')) as mock_post:
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc')
+        assert result == 'Rust rewrite summary.'
+        mock_post.assert_called_once()
+
+    def test_includes_youtube_url_in_request(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch('handler.requests.post', return_value=self._ok_response('ok')) as mock_post:
+            _h.gemini_summarise_video('https://www.youtube.com/watch?v=XYZ')
+        body = mock_post.call_args[1]['json']
+        parts = body['contents'][0]['parts']
+        uris = [p['fileData']['fileUri'] for p in parts if 'fileData' in p]
+        assert 'https://www.youtube.com/watch?v=XYZ' in uris
+
+    def test_returns_empty_when_no_api_key(self):
+        with patch.object(_h, 'GEMINI_API_KEY', ''):
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc')
+        assert result == ''
+
+    def test_returns_empty_on_api_error(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch('handler.requests.post', side_effect=Exception('network error')):
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc')
+        assert result == ''
+
+    def test_returns_empty_on_http_error(self):
+        mock = MagicMock()
+        mock.raise_for_status.side_effect = Exception('429 quota exceeded')
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch('handler.requests.post', return_value=mock):
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc')
+        assert result == ''
+
 
 # ── TestMakeSummaryWordCount ──────────────────────────────────────────────────
 
@@ -160,12 +222,12 @@ class TestMakeSummaryWordCount:
         resp.content = [MagicMock(text=text)]
         return resp
 
-    def test_short_content_prompt_uses_verbatim_approach(self):
+    def test_short_content_prompt_is_explanatory(self):
         with patch.object(_h, 'ai') as mock_ai:
-            mock_ai.messages.create.return_value = self._mock_response('Excerpt.')
+            mock_ai.messages.create.return_value = self._mock_response('Explanation.')
             _h.make_summary('Title', 'Author', 'Short article.', word_count=100)
         content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
-        assert 'verbatim' in content.lower() or 'excerpt' in content.lower()
+        assert any(w in content.lower() for w in ('explain', 'sentence', 'substance', 'matters'))
 
     def test_long_content_prompt_uses_tldr_approach(self):
         with patch.object(_h, 'ai') as mock_ai:
@@ -179,7 +241,7 @@ class TestMakeSummaryWordCount:
             mock_ai.messages.create.return_value = self._mock_response('Summary.')
             _h.make_summary('Title', 'Author', 'Content.')
         content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
-        assert 'verbatim' in content.lower() or 'excerpt' in content.lower()
+        assert any(w in content.lower() for w in ('explain', 'sentence', 'substance', 'matters'))
 
     def test_exactly_at_threshold_uses_long_approach(self):
         with patch.object(_h, 'ai') as mock_ai:

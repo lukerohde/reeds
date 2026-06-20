@@ -65,9 +65,9 @@ prompts:
     Preview: {preview}
 
   summarise_short: |
-    Extract the 2-3 most important sentences from this article, quoted verbatim
-    from the text. Ignore navigation, ads, and boilerplate — only return the core idea
-    in the author's own words. No introduction, no commentary, just the sentences.
+    Write 1-2 sentences explaining what this article is about and why it matters
+    to a senior software engineer. Be specific about the core idea — no "the author
+    discusses", no fluff, no markdown formatting. Just the substance.
 
     Title: {title}
     Author: {author}
@@ -84,6 +84,10 @@ prompts:
     Author: {author}
 
     {text}
+
+  youtube_summarise: |
+    Write a dense 3-4 sentence summary of this video for a senior software engineer.
+    Cover the key technical insight and why it matters. No fluff, no markdown.
 
   curate: |
     You are curating a daily reading digest for senior software engineers.

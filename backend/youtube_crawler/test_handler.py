@@ -130,14 +130,47 @@ class TestGetTranscript:
     def test_returns_empty_when_transcript_unavailable(self):
         with patch('handler.YouTubeTranscriptApi') as mock_cls:
             mock_cls.return_value.fetch.side_effect = Exception('disabled')
+            mock_cls.return_value.list.side_effect  = Exception('also disabled')
             result = get_transcript('vid')
         assert result == ''
+
+    def test_logs_error_when_fetch_fails(self, capsys):
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            mock_cls.return_value.fetch.side_effect = Exception('TranscriptsDisabled')
+            mock_cls.return_value.list.side_effect  = Exception('also failed')
+            get_transcript('errVid')
+        out = capsys.readouterr().out
+        assert 'errVid' in out
+        assert 'TranscriptsDisabled' in out
 
     def test_passes_video_id_to_fetch(self):
         with patch('handler.YouTubeTranscriptApi') as mock_cls:
             mock_cls.return_value.fetch.return_value = []
+            mock_cls.return_value.list.return_value = []
             get_transcript('myVideoId')
         mock_cls.return_value.fetch.assert_called_once_with('myVideoId')
+
+    def test_falls_back_to_list_when_fetch_returns_empty(self):
+        """If fetch() returns empty text, list() is tried to find any available transcript."""
+        fallback_snippets = [MagicMock(text='Fallback transcript text')]
+        mock_transcript   = MagicMock()
+        mock_transcript.fetch.return_value = fallback_snippets
+
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            instance = mock_cls.return_value
+            instance.fetch.return_value = []       # fetch returns empty
+            instance.list.return_value  = [mock_transcript]
+            result = get_transcript('abc123')
+
+        assert result == 'Fallback transcript text'
+
+    def test_returns_empty_when_both_fetch_and_list_fail(self):
+        """If fetch raises and list also raises, returns ''."""
+        with patch('handler.YouTubeTranscriptApi') as mock_cls:
+            mock_cls.return_value.fetch.side_effect = Exception('disabled')
+            mock_cls.return_value.list.side_effect  = Exception('also disabled')
+            result = get_transcript('vid')
+        assert result == ''
 
 
 # ── TestHandler ───────────────────────────────────────────────────────────────
@@ -213,6 +246,83 @@ class TestHandler:
 
         assert result['stored'] == 0
         mock_table.put_item.assert_not_called()
+
+    def test_retries_transcript_for_existing_no_content_video(self):
+        """A stored video with no transcript is retried on next crawl run."""
+        now    = datetime.now(timezone.utc)
+        recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {'Item': {
+            'url':         'https://www.youtube.com/watch?v=vid_retry',
+            'served_date': '',
+            'content':     '',
+        }}
+
+        yt = _youtube_mock(_playlist_response(('Retry Video', 'vid_retry', recent)))
+
+        with patch('handler.table', mock_table), \
+             patch('handler.build', return_value=yt), \
+             patch('handler.get_transcript', return_value='Now we have a transcript.') as mock_gt, \
+             patch('handler.YOUTUBERS', [{'name': 'TestChannel', 'channel_id': 'UCtest'}]):
+            from handler import handler
+            result = handler({}, None)
+
+        assert result['stored'] == 0          # not a new item
+        mock_gt.assert_called_once_with('vid_retry')
+        mock_table.update_item.assert_called_once()
+
+    def test_clears_status_when_transcript_retry_succeeds(self):
+        """When a retry fetches a transcript, status is cleared so the digest re-processes."""
+        now    = datetime.now(timezone.utc)
+        recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {'Item': {
+            'url':         'https://www.youtube.com/watch?v=vid_clear',
+            'served_date': '',
+            'content':     '',
+            'status':      'relevant',
+            'summary':     '',
+        }}
+
+        yt = _youtube_mock(_playlist_response(('Clear Video', 'vid_clear', recent)))
+
+        with patch('handler.table', mock_table), \
+             patch('handler.build', return_value=yt), \
+             patch('handler.get_transcript', return_value='Got transcript.'), \
+             patch('handler.YOUTUBERS', [{'name': 'TestChannel', 'channel_id': 'UCtest'}]):
+            from handler import handler
+            handler({}, None)
+
+        kw = mock_table.update_item.call_args[1]
+        vals = kw['ExpressionAttributeValues']
+        assert vals.get(':st') == ''   # status cleared
+        assert vals.get(':sm') == ''   # summary cleared
+
+    def test_skips_retry_for_served_videos(self):
+        """Videos already served should not have their transcript retried."""
+        now    = datetime.now(timezone.utc)
+        recent = (now - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {'Item': {
+            'url':         'https://www.youtube.com/watch?v=vid_served',
+            'served_date': '2026-01-01',
+            'content':     '',
+        }}
+
+        yt = _youtube_mock(_playlist_response(('Served Video', 'vid_served', recent)))
+
+        with patch('handler.table', mock_table), \
+             patch('handler.build', return_value=yt), \
+             patch('handler.get_transcript') as mock_gt, \
+             patch('handler.YOUTUBERS', [{'name': 'TestChannel', 'channel_id': 'UCtest'}]):
+            from handler import handler
+            handler({}, None)
+
+        mock_gt.assert_not_called()
+        mock_table.update_item.assert_not_called()
 
     def test_api_error_skips_channel_and_continues(self):
         """An API error on one channel should not abort processing of others."""

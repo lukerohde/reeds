@@ -52,12 +52,28 @@ def get_recent_videos(youtube, channel_id, since):
 
 
 def get_transcript(video_id):
-    """Fetch auto-generated or manual captions; return joined text or '' if unavailable."""
+    """Fetch captions; return joined text or '' if unavailable.
+
+    Tries fetch() first (fastest path). Falls back to list() if that returns
+    empty — handles videos where the default language lookup fails but captions
+    exist under an explicit language code. Logs errors so failures are diagnosable.
+    """
     try:
         snippets = YouTubeTranscriptApi().fetch(video_id)
-        return ' '.join(s.text for s in snippets)
-    except Exception:
-        return ''
+        text = ' '.join(s.text for s in snippets)
+        if text.strip():
+            return text
+    except Exception as e:
+        print(f'  [transcript] fetch() error for {video_id}: {type(e).__name__}: {e}')
+    try:
+        for transcript in YouTubeTranscriptApi().list(video_id):
+            snippets = transcript.fetch()
+            text = ' '.join(s.text for s in snippets)
+            if text.strip():
+                return text
+    except Exception as e:
+        print(f'  [transcript] list() error for {video_id}: {type(e).__name__}: {e}')
+    return ''
 
 
 def handler(event, context):
@@ -82,10 +98,31 @@ def handler(event, context):
             continue
 
         for v in videos:
-            if table.get_item(Key={'url': v['url']}).get('Item'):
-                print(f'  [skip]   {v["title"]}')
+            existing = table.get_item(Key={'url': v['url']}).get('Item')
+            if existing:
+                # Retry transcript for unserved videos that were stored without one.
+                if existing.get('served_date') == '' and not existing.get('content', '').strip():
+                    transcript = get_transcript(v['video_id'])
+                    if transcript:
+                        table.update_item(
+                            Key={'url': v['url']},
+                            UpdateExpression='SET content = :c, word_count = :w, #s = :st, summary = :sm',
+                            ExpressionAttributeNames={'#s': 'status'},
+                            ExpressionAttributeValues={
+                                ':c':  transcript[:CONTENT_LIMIT],
+                                ':w':  len(transcript.split()),
+                                ':st': '',   # clear so digest re-processes
+                                ':sm': '',
+                            },
+                        )
+                        print(f'  [transcript] {v["title"]} — {len(transcript.split())} words (retry)')
+                    else:
+                        print(f'  [skip]   {v["title"]} (no transcript)')
+                else:
+                    print(f'  [skip]   {v["title"]}')
                 continue
             transcript = get_transcript(v['video_id'])
+            wc = len(transcript.split()) if transcript else 0
             table.put_item(Item={
                 'url':            v['url'],
                 'author':         name,
@@ -95,10 +132,11 @@ def handler(event, context):
                 'served_date':    '',
                 'source':         'youtube',
                 'video_id':       v['video_id'],
-                'content':        transcript[:CONTENT_LIMIT],
-                'word_count':     len(transcript.split()) if transcript else 0,
+                'content':        transcript[:CONTENT_LIMIT] if transcript else '',
+                'word_count':     wc,
             })
-            print(f'  [stored] {v["title"]}')
+            status = f'{wc} words' if transcript else 'no transcript — will retry next crawl'
+            print(f'  [stored] {v["title"]} ({status})')
             stored += 1
 
     return {'stored': stored}

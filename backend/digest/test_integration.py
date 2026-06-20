@@ -64,7 +64,7 @@ def _seed(n, *, raw=False):
         for i in range(n):
             item = {
                 'url':            f'https://example.com/article-{i}',
-                'author':         f'Author {i % 3}',
+                'author':         f'Author {i}',
                 'title':          f'Article {i}: Python, distributed systems, and observability',
                 'published_date': (now - timedelta(hours=i)).isoformat(),
                 'fetched_date':   now.isoformat(),
@@ -363,11 +363,12 @@ class TestAuthorCap:
         assert result['served'] >= 2  # at minimum the fallback floor
 
 
-# ── TestYouTubeItems — YouTube source items bypass relevance check ─────────────
+# ── TestYouTubeItems — YouTube items with no transcript bypass relevance check ──
 
 class TestYouTubeItems:
-    """YouTube source items must bypass the relevance check and be marked relevant
-    immediately. Transcript is stored in content by the youtube_crawler."""
+    """YouTube items without a transcript (content='') bypass the relevance check
+    and are served without a summary. Items WITH a transcript go through the full
+    relevance + summarise pipeline, identical to blog articles."""
 
     def test_youtube_item_marked_relevant_without_content(self):
         """A YouTube item with empty content must get status=relevant (no Claude call)."""
@@ -386,8 +387,11 @@ class TestYouTubeItems:
             'content':        '',
             'word_count':     0,
         })
-        from handler import handler
-        result = handler({}, None)
+        import handler as h
+        with patch.object(h, 'gemini_summarise_video', return_value=''), \
+             patch.object(h, 'is_relevant', return_value=True):
+            from handler import handler
+            result = handler({}, None)
         assert result['served'] == 1
         item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=test123'})['Item']
         assert item['status'] == 'relevant'
@@ -409,8 +413,11 @@ class TestYouTubeItems:
             'content':        '',
             'word_count':     0,
         })
-        from handler import handler
-        handler({}, None)
+        import handler as h
+        with patch.object(h, 'gemini_summarise_video', return_value=''), \
+             patch.object(h, 'is_relevant', return_value=True):
+            from handler import handler
+            handler({}, None)
         html = open(PREVIEW).read()
         assert 'I built a whole app in 10 minutes' in html
         assert 'youtube.com' in html
@@ -447,11 +454,11 @@ class TestYouTubeItems:
 
 class TestYouTubeWithContent:
     """Transcript is extracted by youtube_crawler (stored in content); digest uses
-    the same make_summary() path as blog posts — no Gemini in the digest at all.
+    the same relevance + make_summary() pipeline as blog posts.
     """
 
-    def test_youtube_item_with_content_gets_claude_summary(self):
-        """A YouTube item with a transcript in content gets make_summary called with it."""
+    def test_youtube_item_with_content_goes_through_relevance_and_summarise(self):
+        """A YouTube item with a transcript is relevance-checked and summarised like a blog."""
         ddb        = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
         table      = ddb.Table(TABLE)
         now        = datetime.now(timezone.utc)
@@ -470,17 +477,107 @@ class TestYouTubeWithContent:
         })
 
         import handler as h
-        with patch.object(h, 'make_summary', return_value='Claude summary.') as mock_summary:
+        with patch.object(h, 'is_relevant', return_value=True) as mock_rel, \
+             patch.object(h, 'make_summary', return_value='Claude summary.') as mock_summary:
             from handler import handler
             result = handler({}, None)
 
         assert result['served'] == 1
+        mock_rel.assert_called_once()          # relevance check IS applied to YouTube with transcript
         mock_summary.assert_called_once()
         args, _ = mock_summary.call_args
         assert args[2] == transcript, f"Expected transcript as content arg. Got: {args}"
 
-    def test_youtube_item_without_content_served_without_claude_call(self):
-        """If no transcript is available (empty content), item is still served; Claude not called."""
+    def test_youtube_item_with_content_can_be_ignored(self):
+        """A YouTube item with a transcript that fails relevance check is marked ignored."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=irrelevant',
+            'author':         'Fireship',
+            'title':          'Summer pasta recipes you need to try',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'irrelevant',
+            'content':        'Boil pasta. Add olive oil. Serve with bread.',
+            'word_count':     8,
+        })
+
+        import handler as h
+        with patch.object(h, 'is_relevant', return_value=False) as mock_rel, \
+             patch.object(h, 'make_summary') as mock_summary:
+            from handler import handler
+            result = handler({}, None)
+
+        mock_rel.assert_called_once()
+        mock_summary.assert_not_called()
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=irrelevant'})['Item']
+        assert item['status'] == 'ignored'
+
+    def test_youtube_no_transcript_tries_gemini_then_relevance(self):
+        """No transcript → Gemini called, then relevance checked, then summary stored."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=geminitest',
+            'author':         'Fireship',
+            'title':          'Rust is rewriting everything',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'geminitest',
+            'content':        '',
+            'word_count':     0,
+        })
+
+        import handler as h
+        with patch.object(h, 'gemini_summarise_video', return_value='Gemini: Rust rewrites are taking over.') as mock_g, \
+             patch.object(h, 'is_relevant', return_value=True) as mock_rel:
+            from handler import handler
+            result = handler({}, None)
+
+        assert result['served'] == 1
+        mock_g.assert_called_once_with('https://www.youtube.com/watch?v=geminitest')
+        mock_rel.assert_called_once()             # relevance IS checked
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=geminitest'})['Item']
+        assert item['summary'] == 'Gemini: Rust rewrites are taking over.'  # Gemini output used directly
+        html = open(PREVIEW).read()
+        assert 'Gemini: Rust rewrites are taking over.' in html
+
+    def test_youtube_no_transcript_can_be_ignored_via_relevance(self):
+        """No transcript + irrelevant Gemini summary → item is ignored."""
+        ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
+        table = ddb.Table(TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            'url':            'https://www.youtube.com/watch?v=offtopicrec',
+            'author':         'Fireship',
+            'title':          'My summer holiday vlog',
+            'published_date': now.isoformat(),
+            'fetched_date':   now.isoformat(),
+            'served_date':    '',
+            'source':         'youtube',
+            'video_id':       'offtopicrec',
+            'content':        '',
+            'word_count':     0,
+        })
+
+        import handler as h
+        with patch.object(h, 'gemini_summarise_video', return_value='A relaxing holiday in Portugal.'), \
+             patch.object(h, 'is_relevant', return_value=False):
+            from handler import handler
+            result = handler({}, None)
+
+        item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=offtopicrec'})['Item']
+        assert item['status'] == 'ignored'
+
+    def test_youtube_item_without_content_served_without_make_summary_call(self):
+        """No transcript + Gemini fails → relevance from title only; make_summary never called."""
         ddb   = boto3.resource('dynamodb', endpoint_url=ENDPOINT)
         table = ddb.Table(TABLE)
         now   = datetime.now(timezone.utc)
@@ -498,12 +595,16 @@ class TestYouTubeWithContent:
         })
 
         import handler as h
-        with patch.object(h, 'make_summary') as mock_summary:
+        with patch.object(h, 'gemini_summarise_video', return_value='') as mock_g, \
+             patch.object(h, 'is_relevant', return_value=True) as mock_rel, \
+             patch.object(h, 'make_summary') as mock_summary:
             from handler import handler
             result = handler({}, None)
 
         assert result['served'] == 1
-        mock_summary.assert_not_called()
+        mock_g.assert_called_once()             # Gemini tried (returned '')
+        mock_rel.assert_called_once()           # relevance checked (title-only, content='')
+        mock_summary.assert_not_called()        # Gemini output IS the summary — no Claude call
         item = table.get_item(Key={'url': 'https://www.youtube.com/watch?v=nocaptions'})['Item']
         assert item['status'] == 'relevant'
         assert item['summary'] == ''

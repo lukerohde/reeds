@@ -147,6 +147,7 @@ digest = aws.lambda_.Function(
         "BUCKET_NAME":         site.bucket_name,
         "CF_DISTRIBUTION_ID":  site.distribution_id,
         "ANTHROPIC_API_KEY":   os.environ.get("ANTHROPIC_API_KEY", ""),
+        "GOOGLE_API_KEY":      os.environ.get("GOOGLE_API_KEY", ""),
     }),
 )
 
