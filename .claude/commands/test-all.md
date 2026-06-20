@@ -26,9 +26,10 @@ foundation everything else builds on.
 make build-lambdas
 ```
 
-This installs pip deps into `backend/*/packages/` and immediately asserts that
-`yaml`, `feedparser`, and `anthropic` dirs are present. The build failing here
-is what caused the Lambda outage — catching it here means catching it before deploy.
+This installs pip deps into `backend/*/packages/` and immediately asserts the
+expected dirs are present (`feedparser`, `googleapiclient`, `youtube_transcript_api`
+for the crawler; `anthropic` for the digest). The build failing here is what caused
+the Lambda outage — catching it here means catching it before deploy.
 
 **Pass:** Ends with `✅  Lambda packages verified`.
 **Fail:** pip install failed or a required package dir is missing. Check the

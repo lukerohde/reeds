@@ -13,9 +13,9 @@ all AI cost sits in the digest Lambda.
 
 | File | Purpose |
 |---|---|
-| `config/config.yaml` | **All config**: blogs list, AI prompts, digest settings |
-| `backend/crawler/handler.py` | Pure extract — RSS + content → DynamoDB |
-| `backend/youtube_crawler/handler.py` | Pure extract — YouTube videos → DynamoDB |
+| `config/config.yaml` | **All config**: blogs, YouTube channels, AI prompts, digest settings |
+| `backend/crawler/handler.py` | Pure extract — iterates Sources → DynamoDB (dedup + content-retry loop) |
+| `backend/crawler/sources.py` | Pluggable `Source`s: `BlogSource` (RSS) + `YouTubeSource` (videos + transcripts) |
 | `backend/digest/handler.py` | Transform + curate + render → S3 |
 | `backend/digest/template.html` | HTML template with `%HEADING%`, `%ITEMS%`, `%PREV_LINK%` |
 | `infra/pulumi/__main__.py` | All AWS infra (S3, CloudFront, DynamoDB, Lambdas, EventBridge) |
@@ -28,7 +28,7 @@ Everything tuneable lives in `config/config.yaml`:
 - **youtubers** — list of `{name, channel_id}` entries
 - **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`,
   `words_per_minute`, `summarise_long_threshold`, `youtube_lookback_days`, `max_videos_per_channel`
-- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `youtube_summarise`, `curate`
+- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `curate`
 
 `max_per_author` caps how many articles a single author can contribute to the candidates pool.
 Without it, prolific authors (e.g. Simon Willison posts many times daily) dominate the pool and
@@ -51,17 +51,15 @@ To add a blog: `/add-blog` (discovers feed, verifies, updates config, commits, p
 ## Common commands
 
 ```bash
-make crawl          # fetch RSS feeds + article content → real DynamoDB
-make youtube-crawl  # fetch YouTube videos + transcripts → real DynamoDB (needs YOUTUBE_API_KEY)
+make crawl          # fetch RSS + YouTube (if YOUTUBE_API_KEY set) → real DynamoDB
 make test-youtube-fetch    # print recent videos per channel, no DDB writes (needs YOUTUBE_API_KEY)
 make show-candidates       # show relevant unserved articles + summaries (local dev)
 make digest         # transform + curate → HTML → real S3
 make redigest       # reset today's articles and re-run digest
 make reset-today    # unserve today's articles so digest can be re-run
 make reset-all      # ⚠️  delete all articles (use after schema changes)
-make test           # run all unit tests (crawler + digest + youtube_crawler)
+make test           # run all unit tests (crawler + digest)
 make test-digest    # run digest unit tests only (no LocalStack)
-make test-youtube   # run YouTube crawler unit tests only
 make diagnose-author AUTHOR="Simon Willison"  # query DDB stats for an author
 make test-feed FEED=<url>  # discover and verify a feed URL
 make deploy         # sync public/ assets to S3 + invalidate CloudFront
@@ -70,8 +68,7 @@ make infra-up       # deploy/update AWS infrastructure via Pulumi
 make infra-outputs  # show bucket, CloudFront ID, etc.
 
 make local-up               # start LocalStack (DynamoDB + S3)
-make local-crawl            # crawl → LocalStack DynamoDB (no AI, no AWS)
-make local-youtube-crawl    # YouTube crawl → LocalStack (needs YOUTUBE_API_KEY)
+make local-crawl            # crawl → LocalStack DynamoDB (no AI; YouTube if YOUTUBE_API_KEY set)
 make local-reset            # delete all local articles (re-run local-crawl to start fresh)
 make local-soft-reset       # clear AI fields only (status/summary) — keep content, re-run AI
 make dev                    # digest → preview HTML → open in browser (AI needed, no AWS)
@@ -150,8 +147,9 @@ Three levels, increasing cost:
 
 `make test-integration` auto-skips AI test classes if `ANTHROPIC_API_KEY` is not set.
 
-Package build verification is embedded in `make build-lambdas` — it asserts that
-`yaml` and `feedparser`/`anthropic` dirs exist in `backend/*/packages/` after pip install,
+Package build verification is embedded in `make build-lambdas` — it asserts that the
+expected dirs exist in `backend/*/packages/` after pip install (`feedparser`,
+`googleapiclient`, `youtube_transcript_api` for the crawler; `anthropic` for the digest),
 so a silent pip failure is caught immediately.
 
 ### Slash commands
@@ -160,54 +158,54 @@ Claude Code slash commands live in `.claude/commands/`. See `CLAUDE.md` for the
 full index (`/setup`, `/add-blog`, `/check-localstack`, `/test-integration`,
 `/test-all`, `/verify-infra`, `/diagnose-author`, `/teardown`).
 
-## YouTube integration
+## Sources (pluggable extraction)
 
-YouTube videos enter the same DynamoDB table as blog articles, with `source: 'youtube'`.
-The `youtube_crawler` Lambda fetches recent videos from curated channels via the YouTube
-Data API v3 **and** extracts each video's transcript (`youtube_transcript_api`), storing it
-in `content` — exactly like a blog article's body.
+The crawler is source-agnostic. A `Source` (`backend/crawler/sources.py`) implements just
+two methods:
 
-The digest Lambda then treats YouTube items two ways:
-1. **Transcript present** — same path as blogs: `is_relevant()` then `make_summary()` (Claude),
-   with word-count-based short/long prompt selection.
-2. **No transcript** (captions disabled / fetch failed) — falls back to `gemini_summarise_video(url)`,
-   which has Gemini summarise the video directly from its URL. That output doubles as both the
-   relevance signal and the stored summary (no second Claude call).
+- `discover()` → list of item dicts (`url`, `author`, `title`, `published_date`, …)
+- `fetch_content(item)` → the item's full text (`''` if unavailable)
 
-The crawler retries the transcript on the next run for any unserved video stored without one,
-clearing its `status`/`summary` so the digest reprocesses it.
+Everything else — dedup by `url`, the item schema, `content_limit` truncation, `word_count`,
+and the store/retry loop in `handler.crawl()` — is identical for every source. Adding a
+source is one small class plus an entry in `build_sources()`.
 
-**Required API keys (beyond `ANTHROPIC_API_KEY`):**
-- `YOUTUBE_API_KEY` — YouTube Data API v3 key (for `youtube_crawler` Lambda)
-- `GOOGLE_API_KEY` — Gemini API key (digest Lambda, transcript-less fallback only; optional)
+Two sources ship today:
+- **`BlogSource`** — RSS via `feedparser`; `fetch_content` cleans article HTML with BeautifulSoup.
+- **`YouTubeSource`** — recent uploads via the YouTube Data API v3; `fetch_content` returns the
+  video transcript via `youtube_transcript_api`. Opt-in: only added by `build_sources()` when
+  channels are configured **and** `YOUTUBE_API_KEY` is set.
 
-Add them to `.env` and as GitHub secrets. See `infra/pulumi/__main__.py` for where they're
-injected into Lambda env vars. Without `GOOGLE_API_KEY`, a transcript-less video simply gets
-an empty summary; videos with transcripts are unaffected.
+YouTube items land in the same table as blogs, distinguished only by `source: 'youtube'`
+(plus a `video_id`). Their transcript is stored in `content` — exactly like a blog body —
+so the digest transforms them with the **same** `is_relevant()` + `make_summary()` path,
+with no source-specific branching. A video with no captions is stored with `content: ''`;
+the crawler retries its transcript on later runs (clearing `status`/`summary` so the digest
+reprocesses it on success). Until a transcript appears it's relevance-checked on the title
+alone and served without a summary — exactly how a content-less blog item behaves.
+
+**Required API key (beyond `ANTHROPIC_API_KEY`):**
+- `YOUTUBE_API_KEY` — YouTube Data API v3 key (read-only, free quota), injected into the
+  crawler Lambda. Without it, the YouTube source is simply skipped.
 
 **Config fields (in `config/config.yaml`):**
 - `youtubers` — list of `{name, channel_id}` entries (verify IDs with `make test-youtube-fetch`)
 - `settings.youtube_lookback_days` — how far back to fetch videos per run (default: 7)
 - `settings.max_videos_per_channel` — max new videos per channel per crawl (default: 3)
 - `settings.summarise_long_threshold` — word count at/above which the TLDR prompt is used (default: 500)
-- `prompts.youtube_summarise` — Gemini prompt for the transcript-less fallback
-- `prompts.summarise_short` / `prompts.summarise_long` — Claude prompts for short/long content
+- `prompts.summarise_short` / `prompts.summarise_long` — short/long content prompts (blogs and videos alike)
 
 **Local dev:**
 ```bash
-# YouTube crawling needs a real YOUTUBE_API_KEY (read-only, free quota)
-make local-youtube-crawl   # → LocalStack DynamoDB (fetches videos + transcripts)
 make test-youtube-fetch    # print what videos exist for each channel (no DDB writes)
-
-# Digest handles YouTube items automatically; GOOGLE_API_KEY only needed for the
-# transcript-less fallback
-make dev                   # ANTHROPIC_API_KEY required; GOOGLE_API_KEY optional
+make local-crawl           # RSS + YouTube (if YOUTUBE_API_KEY set) → LocalStack
+make dev                   # ANTHROPIC_API_KEY required
 ```
 
 **DynamoDB schema additions for YouTube items:**
-- `source: 'youtube'` — distinguishes from blog articles
+- `source: 'youtube'` — distinguishes from blog articles (blogs get `source: 'blog'`)
 - `video_id` — YouTube video ID (e.g. `dQw4w9WgXcQ`)
-- `content` — the transcript text (or `''` if none was available; Gemini fallback reads the URL)
+- `content` — the transcript text (or `''` if captions were unavailable; retried next crawl)
 
 ## CI/CD
 
@@ -216,7 +214,7 @@ Push to `main` triggers:
 - `deploy-site.yml` — on changes to `public/`
 
 GitHub secrets required: `PULUMI_ACCESS_TOKEN`, `ANTHROPIC_API_KEY` (plus
-`GOOGLE_API_KEY` and `YOUTUBE_API_KEY` if YouTube is enabled).
+`YOUTUBE_API_KEY` if YouTube is enabled).
 Standalone installs also need `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 aws-quill installs use OIDC (role ARN from parent ingress stack output).
 

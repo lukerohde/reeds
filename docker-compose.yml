@@ -20,6 +20,7 @@ services:
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
       DYNAMODB_TABLE: ${DYNAMODB_TABLE:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
     entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
 
   # ── Digest Lambda — local invocation (make digest) ───────────────────────────
@@ -41,25 +42,6 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:-}
       CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
-
-  # ── YouTube Crawler Lambda — local invocation (make youtube-crawl) ────────────
-  youtube_crawler:
-    image: python:3.12-slim
-    working_dir: /app/backend/youtube_crawler
-    volumes:
-      - .:/app
-      - ./config/config.yaml:/app/backend/youtube_crawler/config.yaml:ro
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
-      DYNAMODB_TABLE: ${DYNAMODB_TABLE:-}
-      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
     entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
 
   # ── Pulumi — reeds infra (make infra-*) ───────────────────────────────────────

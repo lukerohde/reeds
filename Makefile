@@ -49,8 +49,13 @@ test-feed: ## Test a feed URL. Usage: make test-feed FEED=https://example.com/fe
 	@docker compose run --rm crawler python test_feed.py $(FEED)
 
 .PHONY: test
-test: ## Run all unit tests (crawler + digest + youtube_crawler)
-	@docker compose run --rm crawler python -m pytest test_handler.py -v
+test: ## Run all unit tests (crawler + digest)
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=test-table \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		crawler python -m pytest test_handler.py test_sources.py -v
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=test-table \
 		-e BUCKET_NAME=test-bucket \
@@ -58,13 +63,6 @@ test: ## Run all unit tests (crawler + digest + youtube_crawler)
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		digester python -m pytest test_digest.py -v
-	@docker compose run --rm \
-		-e DYNAMODB_TABLE=test-table \
-		-e YOUTUBE_API_KEY=test-key \
-		-e AWS_ACCESS_KEY_ID=test \
-		-e AWS_SECRET_ACCESS_KEY=test \
-		-e AWS_DEFAULT_REGION=eu-west-1 \
-		youtube_crawler python -m pytest test_handler.py -v
 
 .PHONY: test-digest
 test-digest: ## Run digest unit tests only (no LocalStack)
@@ -76,16 +74,6 @@ test-digest: ## Run digest unit tests only (no LocalStack)
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		digester python -m pytest test_digest.py -v
 
-.PHONY: test-youtube
-test-youtube: ## Run YouTube crawler unit tests only (no DynamoDB)
-	@docker compose run --rm \
-		-e DYNAMODB_TABLE=test-table \
-		-e YOUTUBE_API_KEY=test-key \
-		-e AWS_ACCESS_KEY_ID=test \
-		-e AWS_SECRET_ACCESS_KEY=test \
-		-e AWS_DEFAULT_REGION=eu-west-1 \
-		youtube_crawler python -m pytest test_handler.py -v
-
 .PHONY: test-youtube-fetch
 test-youtube-fetch: ## Fetch recent videos for each channel and print them (no DDB writes). Needs YOUTUBE_API_KEY.
 	@test -n "$(YOUTUBE_API_KEY)" || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
@@ -95,26 +83,16 @@ test-youtube-fetch: ## Fetch recent videos for each channel and print them (no D
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
-		youtube_crawler python fetch_test.py
+		crawler python youtube_fetch.py
 
 .PHONY: crawl
-crawl: ## Run crawler Lambda locally (RSS feeds → DynamoDB)
+crawl: ## Run crawler Lambda locally (RSS feeds + YouTube → DynamoDB; YouTube needs YOUTUBE_API_KEY)
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
-	@docker compose run --rm \
-		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
-		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		crawler \
-		python -c "import json; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
-
-.PHONY: youtube-crawl
-youtube-crawl: ## Run YouTube crawler Lambda locally (YouTube API → DynamoDB)
-	@test -n "$(DYNAMODB_TABLE)"   || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
-	@test -n "$(YOUTUBE_API_KEY)"  || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e YOUTUBE_API_KEY=$(YOUTUBE_API_KEY) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		youtube_crawler \
+		crawler \
 		python -c "import json; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
 
 .PHONY: digest
@@ -164,7 +142,6 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		-e DYNAMODB_TABLE=reeds-articles \
 		-e BUCKET_NAME=reeds-local \
 		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-		-e GOOGLE_API_KEY=$(GOOGLE_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
@@ -225,21 +202,7 @@ local-soft-reset: ## Clear AI fields (status/summary) from local articles, keep 
 		crawler python local_soft_reset.py
 
 .PHONY: local-crawl
-local-crawl: ## Fetch RSS feeds → LocalStack DynamoDB (no real AWS)
-	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
-		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
-	@docker compose run --rm \
-		-e DYNAMODB_TABLE=reeds-articles \
-		-e AWS_DEFAULT_REGION=eu-west-1 \
-		-e AWS_ACCESS_KEY_ID=test \
-		-e AWS_SECRET_ACCESS_KEY=test \
-		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		crawler \
-		python -c "import json; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
-
-.PHONY: local-youtube-crawl
-local-youtube-crawl: ## Fetch YouTube videos → LocalStack DynamoDB (needs YOUTUBE_API_KEY)
-	@test -n "$(YOUTUBE_API_KEY)" || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
+local-crawl: ## Fetch RSS feeds (+ YouTube if YOUTUBE_API_KEY set) → LocalStack DynamoDB
 	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
 	@docker compose run --rm \
@@ -249,7 +212,7 @@ local-youtube-crawl: ## Fetch YouTube videos → LocalStack DynamoDB (needs YOUT
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		youtube_crawler \
+		crawler \
 		python -c "import json; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
 
 .PHONY: test-integration
@@ -297,15 +260,14 @@ deploy: ## Sync public/ assets to S3 + invalidate CloudFront
 .PHONY: build-lambdas
 build-lambdas: ## Install Lambda pip deps into backend/*/packages/ (auto-run by infra-up/preview)
 	docker run --rm --platform linux/amd64 -v "$(CURDIR)":/app python:3.12-slim \
-		sh -c "pip install -q -r /app/backend/crawler/requirements.txt         -t /app/backend/crawler/packages/         --upgrade \
-		    && pip install -q -r /app/backend/digest/requirements.txt           -t /app/backend/digest/packages/          --upgrade \
-		    && pip install -q -r /app/backend/youtube_crawler/requirements.txt  -t /app/backend/youtube_crawler/packages/ --upgrade"
-	@test -d backend/crawler/packages/yaml           || { echo "❌  build-lambdas: yaml missing from crawler"; exit 1; }
-	@test -d backend/crawler/packages/feedparser      || { echo "❌  build-lambdas: feedparser missing from crawler"; exit 1; }
-	@test -d backend/digest/packages/yaml             || { echo "❌  build-lambdas: yaml missing from digest"; exit 1; }
-	@test -d backend/digest/packages/anthropic        || { echo "❌  build-lambdas: anthropic missing from digest"; exit 1; }
-	@test -d backend/youtube_crawler/packages/googleapiclient          || { echo "❌  build-lambdas: googleapiclient missing from youtube_crawler"; exit 1; }
-	@test -d backend/youtube_crawler/packages/youtube_transcript_api  || { echo "❌  build-lambdas: youtube_transcript_api missing from youtube_crawler"; exit 1; }
+		sh -c "pip install -q -r /app/backend/crawler/requirements.txt  -t /app/backend/crawler/packages/  --upgrade \
+		    && pip install -q -r /app/backend/digest/requirements.txt   -t /app/backend/digest/packages/   --upgrade"
+	@test -d backend/crawler/packages/yaml                       || { echo "❌  build-lambdas: yaml missing from crawler"; exit 1; }
+	@test -d backend/crawler/packages/feedparser                 || { echo "❌  build-lambdas: feedparser missing from crawler"; exit 1; }
+	@test -d backend/crawler/packages/googleapiclient            || { echo "❌  build-lambdas: googleapiclient missing from crawler"; exit 1; }
+	@test -d backend/crawler/packages/youtube_transcript_api     || { echo "❌  build-lambdas: youtube_transcript_api missing from crawler"; exit 1; }
+	@test -d backend/digest/packages/yaml                        || { echo "❌  build-lambdas: yaml missing from digest"; exit 1; }
+	@test -d backend/digest/packages/anthropic                   || { echo "❌  build-lambdas: anthropic missing from digest"; exit 1; }
 	@echo "✅  Lambda packages verified"
 
 .PHONY: infra-preview

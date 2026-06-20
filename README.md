@@ -6,17 +6,19 @@ Built to replace a scattered news feed with a single curated page of the day's b
 
 ## Architecture
 
-Clean ETL pipeline — two extract Lambdas feed one transform/load Lambda:
+Clean ETL pipeline — an extract Lambda feeds a transform/load Lambda:
 
 ```
 EventBridge (daily cron)
-  → Lambda: crawler          — Extract: RSS feeds + article content → DynamoDB
-  → Lambda: youtube_crawler  — Extract: YouTube videos + transcripts → DynamoDB
-  → Lambda: digest           — Transform: relevance filter → summarise → curate top 10
-                               Load: render HTML → S3
-                                                  ↓
-                                        CloudFront serves it
+  → Lambda: crawler   — Extract: RSS feeds + YouTube videos/transcripts → DynamoDB
+  → Lambda: digest    — Transform: relevance filter → summarise → curate top 10
+                        Load: render HTML → S3
+                                               ↓
+                                     CloudFront serves it
 ```
+
+The crawler is source-agnostic: blogs and YouTube channels are pluggable `Source`
+modules that feed the same pipeline (see [`AGENTS.md`](AGENTS.md)).
 
 Runs entirely on free-tier-friendly serverless: Lambda + EventBridge + DynamoDB + S3 + CloudFront.
 **Target: < $1/month** — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full system diagram and cost breakdown.
@@ -38,8 +40,7 @@ Claude will discover the feed URL, verify it, add it to config, and push.
 Run `make help` for the full list. The common ones:
 
 ```bash
-make crawl          # fetch RSS feeds + article content → real DynamoDB
-make youtube-crawl  # fetch YouTube videos + transcripts → real DynamoDB
+make crawl          # fetch RSS feeds + YouTube videos/transcripts → real DynamoDB
 make digest         # transform + curate → HTML → real S3
 make redigest       # reset today's articles and re-run digest
 make deploy         # sync public/ static assets to S3
@@ -58,8 +59,8 @@ make local-reset   # delete all local articles (re-run local-crawl to start fres
 ```
 
 `make dev` writes to `/tmp/reeds-digest-preview.html` and opens it. Only `ANTHROPIC_API_KEY`
-is needed — LocalStack handles AWS locally with dummy credentials. (YouTube crawling locally
-needs a real `YOUTUBE_API_KEY`: `make local-youtube-crawl`.)
+is needed — LocalStack handles AWS locally with dummy credentials. (YouTube is crawled
+automatically when `YOUTUBE_API_KEY` is set.)
 
 Prompt engineering workflow:
 ```bash
@@ -92,13 +93,12 @@ ANTHROPIC_API_KEY=
 DYNAMODB_TABLE=reeds-articles
 # Optional — YouTube integration:
 # YOUTUBE_API_KEY=
-# GOOGLE_API_KEY=   # Gemini, only for the transcript-less video fallback
 ```
 
 ## CI/CD
 
 GitHub secrets: `PULUMI_ACCESS_TOKEN` (+ `ANTHROPIC_API_KEY` for infra deploy; plus
-`GOOGLE_API_KEY` and `YOUTUBE_API_KEY` if YouTube is enabled).
+`YOUTUBE_API_KEY` if YouTube is enabled).
 AWS credentials via OIDC from the parent ingress stack — no AWS keys stored in GitHub.
 
 Push to `main` triggers:

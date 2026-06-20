@@ -18,7 +18,7 @@ permissions:
   id-token: write
   contents: read
 
-# GitHub secrets needed: PULUMI_ACCESS_TOKEN, ANTHROPIC_API_KEY, GOOGLE_API_KEY, YOUTUBE_API_KEY.
+# GitHub secrets needed: PULUMI_ACCESS_TOKEN, ANTHROPIC_API_KEY, YOUTUBE_API_KEY.
 # AWS credentials are obtained via OIDC — the role ARN is read from the parent
 # ingress stack (lukerohde/lukerohde-ingress/prod), which /setup fills in.
 
@@ -51,7 +51,6 @@ jobs:
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: make infra-preview
 
@@ -60,6 +59,5 @@ jobs:
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: make infra-up

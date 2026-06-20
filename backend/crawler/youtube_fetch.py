@@ -8,10 +8,18 @@ Usage:
 """
 import os
 import sys
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
+
+import yaml
 from googleapiclient.discovery import build
 
-from handler import get_recent_videos, YOUTUBERS, LOOKBACK_DAYS
+from sources import get_recent_videos
+
+_cfg          = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
+YOUTUBERS     = _cfg.get('youtubers', [])
+LOOKBACK_DAYS = _cfg['settings'].get('youtube_lookback_days', 7)
+MAX_PER_CHAN  = _cfg['settings'].get('max_videos_per_channel', 3)
 
 if not YOUTUBERS:
     print('No youtubers configured in config/config.yaml')
@@ -28,7 +36,7 @@ for channel in YOUTUBERS:
     cid  = channel['channel_id']
     print(f'--- {name} ({cid})')
     try:
-        videos = get_recent_videos(youtube, cid, since)
+        videos = get_recent_videos(youtube, cid, since, MAX_PER_CHAN)
     except Exception as e:
         print(f'  ERROR: {e}')
         continue
