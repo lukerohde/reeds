@@ -1,22 +1,13 @@
 # reeds — AGENTS.md
 
-Daily blog digest at `reeds.lukeroh.de`. Crawls 10 tech RSS feeds, uses Claude to
-filter and summarise, renders a clean HTML digest page to S3/CloudFront daily.
+Agent operational guide for reeds, a daily blog + YouTube digest at `reeds.lukeroh.de`.
 
-## Architecture
+See [`README.md`](README.md) for the project overview, setup, and quickstart, and
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for the full system diagram and cost breakdown.
+This file covers the operational detail needed to work in the codebase.
 
-```
-EventBridge cron (7pm UTC / 5am AEST)
-  → Lambda: crawler   — Extract: RSS feeds + article content → DynamoDB
-  → Lambda: digest    — Transform: relevance filter + summarise (AI)
-                        Curate: pick top 10 (AI)
-                        Load: render HTML → S3
-                                               ↓
-                                     CloudFront serves it
-```
-
-Clean ETL separation: crawler has no AI dependency (cheap, fast, testable).
-All AI cost sits in the digest Lambda.
+Clean ETL separation: the crawlers have no AI dependency (cheap, fast, testable);
+all AI cost sits in the digest Lambda.
 
 ## Key files
 
@@ -34,8 +25,10 @@ All AI cost sits in the digest Lambda.
 
 Everything tuneable lives in `config/config.yaml`:
 - **blogs** — list of `{author, url, feed}` entries
-- **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`, `words_per_minute`
-- **prompts** — `relevance_check`, `summarise`, `curate`
+- **youtubers** — list of `{name, channel_id}` entries
+- **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`,
+  `words_per_minute`, `summarise_long_threshold`, `youtube_lookback_days`, `max_videos_per_channel`
+- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `youtube_summarise`, `curate`
 
 `max_per_author` caps how many articles a single author can contribute to the candidates pool.
 Without it, prolific authors (e.g. Simon Willison posts many times daily) dominate the pool and
@@ -59,7 +52,9 @@ To add a blog: `/add-blog` (discovers feed, verifies, updates config, commits, p
 
 ```bash
 make crawl          # fetch RSS feeds + article content → real DynamoDB
-make youtube-crawl  # fetch YouTube videos → real DynamoDB (needs YOUTUBE_API_KEY)
+make youtube-crawl  # fetch YouTube videos + transcripts → real DynamoDB (needs YOUTUBE_API_KEY)
+make test-youtube-fetch    # print recent videos per channel, no DDB writes (needs YOUTUBE_API_KEY)
+make show-candidates       # show relevant unserved articles + summaries (local dev)
 make digest         # transform + curate → HTML → real S3
 make redigest       # reset today's articles and re-run digest
 make reset-today    # unserve today's articles so digest can be re-run
@@ -159,70 +154,60 @@ Package build verification is embedded in `make build-lambdas` — it asserts th
 `yaml` and `feedparser`/`anthropic` dirs exist in `backend/*/packages/` after pip install,
 so a silent pip failure is caught immediately.
 
-### Claude commands
+### Slash commands
 
-`/verify-infra` — after a deployment or missed digest: checks EventBridge rules,
-Lambda targeting, invoke permissions, and Lambda startup (catches missing packages
-before the schedule fires).
-
-`/test-integration` — interactive guide: checks LocalStack is running, runs the
-test suite, and interprets failures with suggested fixes.
-
-`/test-all` — full test suite: unit, integration, infra health, and manual checks.
-
-`/teardown` — destroy all reeds infrastructure cleanly (empties S3 first).
-
-`/diagnose-author` — queries DynamoDB for an author's served/unserved breakdown,
-position in the candidates pool, and per-day history. Use to debug underrepresentation
-or firehose-author problems. Accepts `AUTHOR="Author Name"` argument.
-
-`/check-localstack` — verifies LocalStack is running, the table and bucket exist,
-and there are articles to work with. Run before `make dev` or `make test-integration`
-if you're getting confusing connection errors.
+Claude Code slash commands live in `.claude/commands/`. See `CLAUDE.md` for the
+full index (`/setup`, `/add-blog`, `/check-localstack`, `/test-integration`,
+`/test-all`, `/verify-infra`, `/diagnose-author`, `/teardown`).
 
 ## YouTube integration
 
 YouTube videos enter the same DynamoDB table as blog articles, with `source: 'youtube'`.
-The `youtube_crawler` Lambda fetches recent videos from curated channels via the YouTube Data API v3.
-The digest Lambda uses a two-step pipeline: Gemini extracts the transcript, then Claude summarises it
-(same `make_summary()` path as blog posts, with word-count-based prompt selection).
+The `youtube_crawler` Lambda fetches recent videos from curated channels via the YouTube
+Data API v3 **and** extracts each video's transcript (`youtube_transcript_api`), storing it
+in `content` — exactly like a blog article's body.
+
+The digest Lambda then treats YouTube items two ways:
+1. **Transcript present** — same path as blogs: `is_relevant()` then `make_summary()` (Claude),
+   with word-count-based short/long prompt selection.
+2. **No transcript** (captions disabled / fetch failed) — falls back to `gemini_summarise_video(url)`,
+   which has Gemini summarise the video directly from its URL. That output doubles as both the
+   relevance signal and the stored summary (no second Claude call).
+
+The crawler retries the transcript on the next run for any unserved video stored without one,
+clearing its `status`/`summary` so the digest reprocesses it.
 
 **Required API keys (beyond `ANTHROPIC_API_KEY`):**
 - `YOUTUBE_API_KEY` — YouTube Data API v3 key (for `youtube_crawler` Lambda)
-- `GEMINI_API_KEY` — Gemini API key (for `digest` Lambda, transcript extraction only)
+- `GOOGLE_API_KEY` — Gemini API key (digest Lambda, transcript-less fallback only; optional)
 
-Add both to `.env` and as GitHub secrets. See `infra/pulumi/__main__.py` for where they're
-injected into Lambda env vars.
-
-**YouTube summarisation pipeline:**
-1. `fetch_youtube_transcript(url)` — Gemini reads video, returns spoken transcript text (or None if no key)
-2. `make_summary(title, author, transcript, word_count=len(transcript.split()))` — Claude summarises
-
-Without `GEMINI_API_KEY`, YouTube items get a placeholder summary but are still served.
-YouTube items skip the relevance check — channel list is manually curated.
+Add them to `.env` and as GitHub secrets. See `infra/pulumi/__main__.py` for where they're
+injected into Lambda env vars. Without `GOOGLE_API_KEY`, a transcript-less video simply gets
+an empty summary; videos with transcripts are unaffected.
 
 **Config fields (in `config/config.yaml`):**
 - `youtubers` — list of `{name, channel_id}` entries (verify IDs with `make test-youtube-fetch`)
 - `settings.youtube_lookback_days` — how far back to fetch videos per run (default: 7)
 - `settings.max_videos_per_channel` — max new videos per channel per crawl (default: 3)
-- `settings.summarise_long_threshold` — word count above which TLDR prompt is used (default: 500)
-- `prompts.youtube_transcript` — Gemini prompt to extract spoken transcript
+- `settings.summarise_long_threshold` — word count at/above which the TLDR prompt is used (default: 500)
+- `prompts.youtube_summarise` — Gemini prompt for the transcript-less fallback
 - `prompts.summarise_short` / `prompts.summarise_long` — Claude prompts for short/long content
 
 **Local dev:**
 ```bash
 # YouTube crawling needs a real YOUTUBE_API_KEY (read-only, free quota)
-make local-youtube-crawl   # → LocalStack DynamoDB
+make local-youtube-crawl   # → LocalStack DynamoDB (fetches videos + transcripts)
 make test-youtube-fetch    # print what videos exist for each channel (no DDB writes)
 
-# Digest handles YouTube items automatically if GEMINI_API_KEY is set
-make dev                   # picks up YouTube items; GEMINI_API_KEY + ANTHROPIC_API_KEY needed
+# Digest handles YouTube items automatically; GOOGLE_API_KEY only needed for the
+# transcript-less fallback
+make dev                   # ANTHROPIC_API_KEY required; GOOGLE_API_KEY optional
 ```
 
 **DynamoDB schema additions for YouTube items:**
 - `source: 'youtube'` — distinguishes from blog articles
 - `video_id` — YouTube video ID (e.g. `dQw4w9WgXcQ`)
-- `content: ''` — always empty; Gemini reads video from URL at transcript-extraction time
+- `content` — the transcript text (or `''` if none was available; Gemini fallback reads the URL)
 
 ## CI/CD
 
@@ -230,20 +215,12 @@ Push to `main` triggers:
 - `deploy-infra.yml` — on changes to `infra/`, `backend/`, `config/`
 - `deploy-site.yml` — on changes to `public/`
 
-GitHub secrets required: `PULUMI_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`.
+GitHub secrets required: `PULUMI_ACCESS_TOKEN`, `ANTHROPIC_API_KEY` (plus
+`GOOGLE_API_KEY` and `YOUTUBE_API_KEY` if YouTube is enabled).
 Standalone installs also need `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 aws-quill installs use OIDC (role ARN from parent ingress stack output).
 
 ## Cost
 
-Target: **< $1/month**
-
-| Resource | Cost |
-|---|---|
-| Lambda (2 functions, ~60 invocations/month) | Free tier |
-| DynamoDB (PAY_PER_REQUEST) | Free tier |
-| EventBridge (2 schedules) | Free |
-| S3 (~10KB HTML) | ~$0.001/month |
-| CloudFront | Free tier |
-| ACM certificate | Free |
-| Route53 (if standalone zone) | ~$0.50/month |
+Target **< $1/month** — full breakdown in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Route53 adds ~$0.50/month only when reeds creates a standalone zone (see DNS modes above).

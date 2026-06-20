@@ -3,20 +3,23 @@
 ```mermaid
 flowchart TB
     %% ── External sources ─────────────────────────────────────────────────────
-    subgraph sources["RSS Sources (10 blogs)"]
-        RSS["Simon Willison · Andrej Karpathy · Martin Fowler\nCharity Majors · Thorsten Ball · Kent Beck\nHenrik Kniberg · Steve Yegge · Addy Osmani · Bryan Cantrill"]
+    subgraph sources["Sources"]
+        RSS["RSS — 10 blogs\nSimon Willison · Karpathy · Fowler · Majors\nThorsten Ball · Kent Beck · Kniberg · Yegge · Osmani · Cantrill"]
+        YT_SRC["YouTube — 5 channels\nFireship · Theo · Karpathy · Yannic Kilcher · Two Minute Papers"]
     end
 
     %% ── AWS scheduled pipeline ───────────────────────────────────────────────
     subgraph aws["AWS — eu-west-1"]
 
-        subgraph schedule["EventBridge (2 daily schedules)"]
-            EB_CRAWL["Crawler schedule"]
-            EB_DIGEST["Digest schedule"]
+        subgraph schedule["EventBridge (3 daily schedules)"]
+            EB_CRAWL["Crawler schedule\ncron(0 19 * * ? *)"]
+            EB_YT["YouTube crawler schedule\ncron(0 19 * * ? *)"]
+            EB_DIGEST["Digest schedule\ncron(10 19 * * ? *)"]
         end
 
         subgraph lambdas["Lambda"]
             CRAWLER["crawler\n① parse RSS feeds\n② HTTP fetch article text\n③ put_item → DynamoDB"]
+            YT_CRAWLER["youtube_crawler\n① list recent uploads (Data API)\n② fetch transcript (captions)\n③ put_item → DynamoDB"]
             DIGEST["digest\n① scan unserved articles\n② relevance filter  (AI)\n③ summarise each  (AI)\n④ curate top 10   (AI)\n⑤ render HTML → S3\n⑥ invalidate CloudFront\n⑦ mark articles served"]
         end
 
@@ -29,9 +32,10 @@ flowchart TB
     end
 
     %% ── External AI ──────────────────────────────────────────────────────────
-    subgraph ai["Anthropic Claude API"]
-        HAIKU["claude-haiku-4-5\nrelevance check\n(yes / no)"]
-        SONNET["claude-sonnet-4-6\nsummarise + curate"]
+    subgraph ai["AI APIs"]
+        HAIKU["Claude haiku-4-5\nrelevance check (yes / no)"]
+        SONNET["Claude sonnet-4-6\nsummarise + curate"]
+        GEMINI["Gemini 2.0 Flash\nvideo summary fallback\n(transcript-less videos)"]
     end
 
     %% ── CI/CD ────────────────────────────────────────────────────────────────
@@ -47,14 +51,19 @@ flowchart TB
 
     %% ── Crawl flow ───────────────────────────────────────────────────────────
     EB_CRAWL -->|daily trigger| CRAWLER
-    CRAWLER -->|"HTTP GET (feedparser + requests)"| sources
+    CRAWLER -->|"HTTP GET (feedparser + requests)"| RSS
     CRAWLER -->|"put_item (new articles only)"| DDB
+
+    EB_YT -->|daily trigger| YT_CRAWLER
+    YT_CRAWLER -->|"Data API + transcript fetch"| YT_SRC
+    YT_CRAWLER -->|"put_item (new videos only)"| DDB
 
     %% ── Digest flow ──────────────────────────────────────────────────────────
     EB_DIGEST -->|daily trigger| DIGEST
     DIGEST -->|"scan (served_date = '')"| DDB
     DIGEST -->|"is this relevant?"| HAIKU
     DIGEST -->|"summarise + curate top 10"| SONNET
+    DIGEST -->|"transcript-less video?"| GEMINI
     DIGEST -->|"put_object (HTML)"| S3
     DIGEST -->|"create_invalidation"| CF
     DIGEST -->|"update served_date"| DDB
@@ -81,11 +90,16 @@ flowchart TB
 | **Extract** | EventBridge | Crawler Lambda | daily cron |
 | | RSS feeds | Crawler Lambda | feed entries + article HTML |
 | | Crawler Lambda | DynamoDB | articles (url, title, content, author, dates) |
+| | EventBridge | YouTube Crawler | daily cron |
+| | YouTube Data API | YouTube Crawler | recent video metadata |
+| | YouTube captions | YouTube Crawler | transcript text |
+| | YouTube Crawler | DynamoDB | videos (source=youtube, video_id, transcript) |
 | **Transform** | EventBridge | Digest Lambda | daily cron |
 | | DynamoDB | Digest Lambda | unserved articles |
 | | Digest Lambda | Claude Haiku | relevance check per article |
 | | Digest Lambda | Claude Sonnet | summary per relevant article |
 | | Digest Lambda | Claude Sonnet | curate top 10 from pool |
+| | Digest Lambda | Gemini 2.0 Flash | summary for transcript-less videos (fallback) |
 | | Digest Lambda | DynamoDB | write `status`, `summary`, `served_date` |
 | **Load** | Digest Lambda | S3 | `digest/{date}/index.html` + `latest/` |
 | | Digest Lambda | CloudFront | cache invalidation |
@@ -96,9 +110,10 @@ flowchart TB
 
 | Resource | Tier |
 |---|---|
-| Lambda (2 functions, ~60 invocations/month) | Free tier |
+| Lambda (3 functions, ~90 invocations/month) | Free tier |
 | DynamoDB (PAY_PER_REQUEST) | Free tier |
-| EventBridge (2 schedules) | Free |
+| EventBridge (3 schedules) | Free |
+| YouTube Data API v3 | Free quota |
 | S3 (~10 KB HTML) | ~$0.001/month |
 | CloudFront | Free tier |
 | ACM certificate | Free |
