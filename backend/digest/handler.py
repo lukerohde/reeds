@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 import boto3
 import anthropic
@@ -9,13 +10,16 @@ from boto3.dynamodb.conditions import Attr
 
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
-CANDIDATES_POOL  = _cfg['settings']['candidates_pool']
-DIGEST_SIZE      = _cfg['settings']['digest_size']
-WORDS_PER_MINUTE = _cfg['settings']['words_per_minute']
+CANDIDATES_POOL          = _cfg['settings']['candidates_pool']
+MAX_PER_AUTHOR           = _cfg['settings'].get('max_per_author', 0)
+DIGEST_SIZE              = _cfg['settings']['digest_size']
+WORDS_PER_MINUTE         = _cfg['settings']['words_per_minute']
+SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 
-RELEVANCE_CHECK = _cfg['prompts']['relevance_check']
-SUMMARISE       = _cfg['prompts']['summarise']
-CURATE          = _cfg['prompts']['curate']
+RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
+SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
+SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
+CURATE                = _cfg['prompts']['curate']
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
@@ -33,6 +37,30 @@ ai       = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY', ''))
 TEMPLATE = (Path(__file__).parent / 'template.html').read_text()
 
 
+# ── Candidate selection ───────────────────────────────────────────────────────
+
+def select_candidates(unserved, pool_size=None, max_per_author=None):
+    """Return up to pool_size articles, capped at max_per_author each.
+
+    Defaults to the module-level config values. Override params are exposed for
+    testing without config dependency.
+    """
+    _pool = CANDIDATES_POOL if pool_size is None else pool_size
+    _cap  = MAX_PER_AUTHOR  if max_per_author is None else max_per_author
+    if not _cap:
+        return unserved[:_pool]
+    counts = {}
+    pool = []
+    for item in unserved:  # sorted by published_date desc
+        author = item.get('author', '')
+        if counts.get(author, 0) < _cap:
+            pool.append(item)
+            counts[author] = counts.get(author, 0) + 1
+        if len(pool) >= _pool:
+            break
+    return pool
+
+
 # ── Transform ─────────────────────────────────────────────────────────────────
 
 def is_relevant(title, content):
@@ -44,21 +72,33 @@ def is_relevant(title, content):
     return msg.content[0].text.strip().lower().startswith('y')
 
 
-def make_summary(title, author, content):
-    msg = ai.messages.create(
+def make_summary(title, author, content, word_count=0):
+    """Summarise content via Claude. Short articles get verbatim excerpt; long ones get TLDR."""
+    wc     = int(word_count or 0)
+    prompt = SUMMARISE_LONG if wc >= SUMMARISE_LONG_THRESHOLD else SUMMARISE_SHORT
+    msg    = ai.messages.create(
         model='claude-sonnet-4-6',
         max_tokens=200,
-        messages=[{'role': 'user', 'content': SUMMARISE.format(title=title, author=author, text=content)}],
+        messages=[{'role': 'user', 'content': prompt.format(title=title, author=author, text=content)}],
     )
     return msg.content[0].text
 
 
 def transform(items):
-    """Relevance-check and summarise unprocessed articles. Updates DDB in place."""
+    """Relevance-check and summarise unprocessed items. Updates DDB in place.
+
+    Every item — blog article or YouTube transcript — is handled identically:
+    its `content` text drives the relevance check and the summary. Items stored
+    without content (e.g. a video with no captions) are relevance-checked on the
+    title alone and served without a summary; the crawler keeps retrying their
+    content on later runs.
+    """
     for item in items:
         if item.get('status'):
             continue
+
         content = item.get('content', '')
+
         if not is_relevant(item['title'], content):
             item['status'] = 'ignored'
             table.update_item(
@@ -70,7 +110,7 @@ def transform(items):
             print(f"  [ignored]  {item['author']}: {item['title']}")
             continue
 
-        summary = make_summary(item['title'], item['author'], content) if content else ''
+        summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
         item['status']  = 'relevant'
         item['summary'] = summary
         table.update_item(
@@ -126,6 +166,13 @@ def prev_digest_date(current_date_str):
         return None
 
 
+def _md_to_html(text):
+    """Convert bold/italic markdown to HTML so summaries render correctly."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'<em>\1</em>', text)
+    return text
+
+
 def build_html(articles, date_str, prev_date_str):
     items_html = ''
     for a in articles:
@@ -138,7 +185,7 @@ def build_html(articles, date_str, prev_date_str):
     <article>
       <h2><a href="{a['url']}">{a['title']}</a></h2>
       <p class="meta">{meta}</p>
-      <p class="summary">{a.get('summary', '')}</p>
+      <p class="summary">{_md_to_html(a.get('summary', ''))}</p>
     </article>"""
 
     prev_link = (
@@ -164,7 +211,7 @@ def handler(event, context):
     print(f"[digest] {len(unserved)} unserved articles")
 
     # Transform: process unprocessed articles in the candidate pool
-    candidates_raw = unserved[:CANDIDATES_POOL]
+    candidates_raw = select_candidates(unserved)
     transform(candidates_raw)
 
     # Curate from relevant candidates

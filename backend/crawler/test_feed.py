@@ -11,7 +11,7 @@ and common URL patterns, then shows what the crawler would store.
 import sys
 import requests
 from bs4 import BeautifulSoup
-from handler import parse_feed
+from sources import parse_feed
 
 FEED_TYPES = {'application/rss+xml', 'application/atom+xml', 'application/feed+json'}
 COMMON_PATHS = ['/feed', '/rss', '/atom.xml', '/feed.xml', '/index.xml', '/rss.xml', '/feeds/posts/default']

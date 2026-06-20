@@ -2,57 +2,52 @@
 
 Daily digest of AI, devops, and software engineering writing at [reeds.lukeroh.de](https://reeds.lukeroh.de).
 
-Built to replace a scattered news feed with a single curated page of the day's best writing from select feeds. Also a testbed for a cost-effective serverless recipe: Lambda + EventBridge + DynamoDB, with LocalStack for fully offline local development.
+Built to replace a scattered news feed with a single curated page of the day's best writing from select blogs and YouTube channels. Also a testbed for a cost-effective serverless recipe: Lambda + EventBridge + DynamoDB, with LocalStack for fully offline local development.
 
 ## Architecture
 
-Clean ETL pipeline:
+Clean ETL pipeline — an extract Lambda feeds a transform/load Lambda:
 
 ```
 EventBridge (daily cron)
-  → Lambda: crawler   — Extract: RSS feeds + article content → DynamoDB
+  → Lambda: crawler   — Extract: RSS feeds + YouTube videos/transcripts → DynamoDB
   → Lambda: digest    — Transform: relevance filter → summarise → curate top 10
                         Load: render HTML → S3
                                                ↓
                                      CloudFront serves it
 ```
 
-| Resource | Cost |
-|---|---|
-| Lambda (2 functions, ~60 invocations/month) | Free tier |
-| DynamoDB (PAY_PER_REQUEST) | Free tier |
-| EventBridge (2 schedules) | Free |
-| S3 (~10 KB HTML) | ~$0.001/month |
-| CloudFront | Free tier |
-| ACM certificate | Free |
+The crawler is source-agnostic: blogs and YouTube channels are pluggable `Source`
+modules that feed the same pipeline (see [`AGENTS.md`](AGENTS.md)).
 
-**Target: < $1/month.**
+Runs entirely on free-tier-friendly serverless: Lambda + EventBridge + DynamoDB + S3 + CloudFront.
+**Target: < $1/month** — see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full system diagram and cost breakdown.
 
-## Blogs tracked
+## Sources tracked
 
-Simon Willison · Andrej Karpathy · Martin Fowler · Charity Majors · Thorsten Ball ·
+**Blogs:** Simon Willison · Andrej Karpathy · Martin Fowler · Charity Majors · Thorsten Ball ·
 Kent Beck · Henrik Kniberg · Steve Yegge · Addy Osmani · Bryan Cantrill
+
+**YouTube:** Fireship · Theo (t3.gg) · Andrej Karpathy · Yannic Kilcher · Two Minute Papers
 
 Configured in [`config/config.yaml`](config/config.yaml) alongside prompts and digest settings.
 
-To add a new blog, open this repo in [Claude Code](https://claude.ai/code) and run:
-```
-/add-blog
-```
+To add a new blog, open this repo in [Claude Code](https://claude.ai/code) and run `/add-blog` —
 Claude will discover the feed URL, verify it, add it to config, and push.
+
+To add a YouTube channel: `make add-youtuber HANDLE=@handle` — it resolves the channel ID
+straight from the page (no API key needed) and appends it to `config/config.yaml`.
 
 ## Commands
 
+Run `make help` for the full list. The common ones:
+
 ```bash
-make crawl          # fetch RSS feeds + article content → real DynamoDB
+make crawl          # fetch RSS feeds + YouTube videos/transcripts → real DynamoDB
 make digest         # transform + curate → HTML → real S3
 make redigest       # reset today's articles and re-run digest
-make reset-today    # unserve today's articles so digest can be re-run
-make reset-all      # ⚠️  delete all articles (use after schema changes)
-make test-feed FEED=<url>  # test whether a feed URL is parseable
 make deploy         # sync public/ static assets to S3
 make infra-up       # deploy/update AWS infrastructure via Pulumi
-make infra-outputs  # show bucket name, CloudFront ID, etc.
 ```
 
 ## Local development (no AWS required)
@@ -67,14 +62,15 @@ make local-reset   # delete all local articles (re-run local-crawl to start fres
 ```
 
 `make dev` writes to `/tmp/reeds-digest-preview.html` and opens it. Only `ANTHROPIC_API_KEY`
-is needed — LocalStack handles AWS locally with dummy credentials.
+is needed — LocalStack handles AWS locally with dummy credentials. (YouTube is crawled
+automatically when `YOUTUBE_API_KEY` is set.)
 
 Prompt engineering workflow:
 ```bash
-make local-crawl   # once — fetch articles into LocalStack
-make local-reset   # wipe AI results
+make local-crawl        # once — fetch articles into LocalStack
+make local-soft-reset   # clear AI fields (status/summary) without deleting content
 # edit config/config.yaml (prompts section)
-make dev           # re-run transform + curate + preview
+make dev                # re-run transform + curate + preview
 ```
 
 ## Setup
@@ -98,11 +94,14 @@ AWS_SECRET_ACCESS_KEY=
 AWS_DEFAULT_REGION=eu-west-1
 ANTHROPIC_API_KEY=
 DYNAMODB_TABLE=reeds-articles
+# Optional — YouTube integration:
+# YOUTUBE_API_KEY=
 ```
 
 ## CI/CD
 
-One GitHub secret needed: `PULUMI_ACCESS_TOKEN` (+ `ANTHROPIC_API_KEY` for infra deploy).
+GitHub secrets: `PULUMI_ACCESS_TOKEN` (+ `ANTHROPIC_API_KEY` for infra deploy; plus
+`YOUTUBE_API_KEY` if YouTube is enabled).
 AWS credentials via OIDC from the parent ingress stack — no AWS keys stored in GitHub.
 
 Push to `main` triggers:

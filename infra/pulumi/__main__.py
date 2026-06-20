@@ -1,7 +1,7 @@
 """
 reeds — Daily digest site
 S3 + CloudFront front-end (via StaticSite component)
-DynamoDB table + two Lambda functions + EventBridge schedule
+DynamoDB table + two Lambda functions + EventBridge schedules
 
 DNS is resolved one of three ways (first match wins):
   1. reeds:parentIngressStack — Pulumi StackReference with a zone_id output
@@ -10,6 +10,11 @@ DNS is resolved one of three ways (first match wins):
                                 (you already have a zone, just give us the ID)
   3. (neither)                — a new Route53 zone is created; nameservers are
                                 exported so you can update your registrar
+
+Required env vars (set in .env or GitHub secrets):
+  ANTHROPIC_API_KEY  — Claude API key (digest Lambda)
+  YOUTUBE_API_KEY    — YouTube Data API v3 key (crawler Lambda; optional, enables
+                       the YouTube source when channels are configured)
 """
 
 import os
@@ -124,7 +129,8 @@ crawler = aws.lambda_.Function(
     code=crawler_zip,
     timeout=300,
     environment=aws.lambda_.FunctionEnvironmentArgs(variables={
-        "DYNAMODB_TABLE": table.name,
+        "DYNAMODB_TABLE":  table.name,
+        "YOUTUBE_API_KEY": os.environ.get("YOUTUBE_API_KEY", ""),
     }),
 )
 
@@ -147,6 +153,7 @@ digest = aws.lambda_.Function(
 )
 
 # ── EventBridge schedules (5am AEST = 7pm UTC) ───────────────────────────────
+# crawler runs at 7pm UTC; digest runs 10 min later
 crawler_schedule = aws.cloudwatch.EventRule("crawler-schedule", schedule_expression="cron(0 19 * * ? *)")
 aws.cloudwatch.EventTarget("crawler-target", rule=crawler_schedule.name, arn=crawler.arn)
 aws.lambda_.Permission("crawler-permission", action="lambda:InvokeFunction", function=crawler.name, principal="events.amazonaws.com", source_arn=crawler_schedule.arn)

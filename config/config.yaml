@@ -1,3 +1,25 @@
+youtubers:
+  # Add a channel by handle or URL:  make add-youtuber HANDLE=@buildwithdc
+  # Verify configured channels:      make test-youtube-fetch
+  - name: Fireship
+    channel_id: UCsBjURrPoezykLs9EqgamOA
+  - name: Theo - t3.gg
+    channel_id: UCbRP3c757lWg9M-U7TyEkXA
+  - name: Andrej Karpathy
+    channel_id: UCXUPKJO5MZQN11PqgIvyuvQ
+  - name: Yannic Kilcher
+    channel_id: UCZHmQk67mSJgfCCTn7xBfew
+  - name: Two Minute Papers
+    channel_id: UCbfYPyITQ-7l4upoX8nvctg
+  - name: Derick Chen - BuildWithDC
+    channel_id: UC-1df1qeT7fKPz4GKUjop_g
+  - name: Wes Roth
+    channel_id: UCqcbQf6yw5KzRoDDcZ_wBSw
+  - name: Agentic Engineering
+    channel_id: UC5GSyi-1pcmPJrmlF5KpcKA
+  - name: Lex Fridman
+    channel_id: UCJIfeSCssxSC_Dhc5s7woww
+
 blogs:
   - author: Simon Willison
     url: https://simonwillison.net
@@ -31,10 +53,14 @@ blogs:
     feed: https://bcantrill.dtrace.org/index.xml
 
 settings:
-  content_limit: 8000      # chars stored in DynamoDB per article
-  candidates_pool: 20      # unserved articles to consider per digest run
-  digest_size: 10          # articles curated into the final digest
-  words_per_minute: 200    # used to calculate read-time label
+  content_limit: 8000           # chars stored in DynamoDB per article
+  candidates_pool: 20           # unserved articles to consider per digest run
+  max_per_author: 2             # max articles per author in the candidates pool (0 = no cap)
+  digest_size: 10               # articles curated into the final digest
+  words_per_minute: 200         # used to calculate read-time label
+  youtube_lookback_days: 7      # how far back to fetch videos per run
+  max_videos_per_channel: 3     # max new videos per channel per crawl
+  summarise_long_threshold: 500 # word count at/above which TLDR approach is used
 
 prompts:
   relevance_check: |
@@ -46,10 +72,21 @@ prompts:
     Title: {title}
     Preview: {preview}
 
-  summarise: |
-    Extract the 2-3 most important sentences from this article, quoted verbatim
-    from the text. Ignore navigation, ads, and boilerplate — only return the core idea
-    in the author's own words. No introduction, no commentary, just the sentences.
+  summarise_short: |
+    Write 1-2 sentences explaining what this article is about and why it matters
+    to a senior software engineer. Be specific about the core idea — no "the author
+    discusses", no fluff, no markdown formatting. Just the substance.
+
+    Title: {title}
+    Author: {author}
+
+    {text}
+
+  summarise_long: |
+    You are summarising a long article for a senior software engineer's daily digest.
+    Write a TLDR: distil the single most important insight in 2-3 sentences.
+    Use your own words. Be direct and specific — skip the setup, get to the point.
+    No fluff, no "the author discusses" — just the substance.
 
     Title: {title}
     Author: {author}
