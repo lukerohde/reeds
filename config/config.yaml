@@ -13,6 +13,10 @@ youtubers:
     channel_id: UCbfYPyITQ-7l4upoX8nvctg
   - name: Derick Chen - BuildWithDC
     channel_id: UC-1df1qeT7fKPz4GKUjop_g
+  - name: Wes Roth
+    channel_id: UCqcbQf6yw5KzRoDDcZ_wBSw
+  - name: Agentic Engineering
+    channel_id: UC5GSyi-1pcmPJrmlF5KpcKA
 
 blogs:
   - author: Simon Willison
