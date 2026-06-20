@@ -35,6 +35,9 @@ Configured in [`config/config.yaml`](config/config.yaml) alongside prompts and d
 To add a new blog, open this repo in [Claude Code](https://claude.ai/code) and run `/add-blog` —
 Claude will discover the feed URL, verify it, add it to config, and push.
 
+To add a YouTube channel: `make add-youtuber HANDLE=@handle` — it resolves the channel ID
+straight from the page (no API key needed) and appends it to `config/config.yaml`.
+
 ## Commands
 
 Run `make help` for the full list. The common ones:

@@ -48,6 +48,11 @@ test-feed: ## Test a feed URL. Usage: make test-feed FEED=https://example.com/fe
 	@test -n "$(FEED)" || { echo "❌  Usage: make test-feed FEED=https://example.com/feed.xml"; exit 1; }
 	@docker compose run --rm crawler python test_feed.py $(FEED)
 
+.PHONY: add-youtuber
+add-youtuber: ## Resolve a YouTube handle/URL to its channel ID and add it to config. Usage: make add-youtuber HANDLE=@buildwithdc
+	@test -n "$(HANDLE)" || { echo "❌  Usage: make add-youtuber HANDLE=@handle  (or a channel URL / UC… ID)"; exit 1; }
+	@docker compose run --rm crawler python add_youtuber.py "$(HANDLE)"
+
 .PHONY: test
 test: ## Run all unit tests (crawler + digest)
 	@docker compose run --rm \

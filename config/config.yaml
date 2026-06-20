@@ -1,6 +1,6 @@
 youtubers:
-  # Verify channel IDs with: make test-youtube-fetch
-  # Find a channel's ID at: https://www.youtube.com/@handle/about (copy from URL)
+  # Add a channel by handle or URL:  make add-youtuber HANDLE=@buildwithdc
+  # Verify configured channels:      make test-youtube-fetch
   - name: Fireship
     channel_id: UCsBjURrPoezykLs9EqgamOA
   - name: Theo - t3.gg
@@ -11,6 +11,8 @@ youtubers:
     channel_id: UCZHmQk67mSJgfCCTn7xBfew
   - name: Two Minute Papers
     channel_id: UCbfYPyITQ-7l4upoX8nvctg
+  - name: Derick Chen - BuildWithDC
+    channel_id: UC-1df1qeT7fKPz4GKUjop_g
 
 blogs:
   - author: Simon Willison

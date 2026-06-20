@@ -39,6 +39,8 @@ Docker bind-mounts it into the handler working directories at runtime.
 Both handlers load it via `Path(__file__).parent / 'config.yaml'`.
 
 To add a blog: `/add-blog` (discovers feed, verifies, updates config, commits, pushes).
+To add a YouTube channel: `make add-youtuber HANDLE=@handle` (resolves the channel ID
+from the page — no API key needed — and appends it to `config.yaml`).
 
 ## DNS modes
 
@@ -60,6 +62,7 @@ make reset-today    # unserve today's articles so digest can be re-run
 make reset-all      # ⚠️  delete all articles (use after schema changes)
 make test           # run all unit tests (crawler + digest)
 make test-digest    # run digest unit tests only (no LocalStack)
+make add-youtuber HANDLE=@handle   # resolve a YouTube handle/URL → channel ID → add to config
 make diagnose-author AUTHOR="Simon Willison"  # query DDB stats for an author
 make test-feed FEED=<url>  # discover and verify a feed URL
 make deploy         # sync public/ assets to S3 + invalidate CloudFront
@@ -197,6 +200,7 @@ alone and served without a summary — exactly how a content-less blog item beha
 
 **Local dev:**
 ```bash
+make add-youtuber HANDLE=@handle   # resolve channel ID from a handle/URL → config (no API key)
 make test-youtube-fetch    # print what videos exist for each channel (no DDB writes)
 make local-crawl           # RSS + YouTube (if YOUTUBE_API_KEY set) → LocalStack
 make dev                   # ANTHROPIC_API_KEY required
