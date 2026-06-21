@@ -7,11 +7,15 @@ on:
       - "infra/pulumi/**"
       - "backend/**"
       - "config/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-infra.yml"
   pull_request:
     paths:
       - "infra/pulumi/**"
       - "backend/**"
       - "config/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-infra.yml"
   workflow_dispatch:
 
 permissions:

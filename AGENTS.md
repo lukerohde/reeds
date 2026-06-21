@@ -63,6 +63,8 @@ make reset-all      # ⚠️  delete all articles (use after schema changes)
 make test           # run all unit tests (crawler + digest)
 make test-digest    # run digest unit tests only (no LocalStack)
 make add-youtuber HANDLE=@handle   # resolve a YouTube handle/URL → channel ID → add to config
+make invoke FN=crawler     # trigger a Lambda now + print its tailed execution logs (also FN=digest)
+make logs FN=crawler SINCE=2d   # tail a Lambda's CloudWatch logs (needs reeds-logs-read IAM grant)
 make diagnose-author AUTHOR="Simon Willison"  # query DDB stats for an author
 make test-feed FEED=<url>  # discover and verify a feed URL
 make deploy         # sync public/ assets to S3 + invalidate CloudFront

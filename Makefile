@@ -53,6 +53,25 @@ add-youtuber: ## Resolve a YouTube handle/URL to its channel ID and add it to co
 	@test -n "$(HANDLE)" || { echo "❌  Usage: make add-youtuber HANDLE=@handle  (or a channel URL / UC… ID)"; exit 1; }
 	@docker compose run --rm crawler python add_youtuber.py "$(HANDLE)"
 
+.PHONY: logs
+logs: ## Tail a Lambda's CloudWatch logs. Usage: make logs FN=crawler|digest [SINCE=1h]  (needs the reeds-logs-read IAM grant)
+	@test -n "$(FN)" || { echo "❌  Usage: make logs FN=crawler|digest [SINCE=1h]"; exit 1; }
+	@docker compose run --rm --entrypoint sh -e AWS_DEFAULT_REGION=$(INFRA_REGION) awscli -c '\
+		GROUP=$$(aws logs describe-log-groups --log-group-name-prefix /aws/lambda/$(FN) --query "logGroups[0].logGroupName" --output text); \
+		test -n "$$GROUP" -a "$$GROUP" != "None" || { echo "❌  No log group for /aws/lambda/$(FN)*"; exit 1; }; \
+		echo "==> tailing $$GROUP (since $(or $(SINCE),1h))"; \
+		aws logs tail "$$GROUP" --since $(or $(SINCE),1h) --format short'
+
+.PHONY: invoke
+invoke: ## Invoke a Lambda now and print its tailed execution logs. Usage: make invoke FN=crawler|digest
+	@test -n "$(FN)" || { echo "❌  Usage: make invoke FN=crawler|digest"; exit 1; }
+	@docker compose run --rm --entrypoint sh -e AWS_DEFAULT_REGION=$(INFRA_REGION) awscli -c '\
+		NAME=$$(aws lambda list-functions --query "Functions[].FunctionName" --output text | tr "\t" "\n" | grep "^$(FN)-" | head -1); \
+		test -n "$$NAME" || { echo "❌  No function $(FN)-*"; exit 1; }; \
+		echo "==> invoking $$NAME ..."; \
+		aws lambda invoke --function-name "$$NAME" --log-type Tail --query LogResult --output text /tmp/payload >/tmp/b64; \
+		echo "--- payload ---"; cat /tmp/payload; echo; echo "--- log tail ---"; base64 -d /tmp/b64'
+
 .PHONY: test
 test: ## Run all unit tests (crawler + digest)
 	@docker compose run --rm \
