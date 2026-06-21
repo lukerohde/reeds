@@ -68,8 +68,8 @@ invoke: ## Invoke a Lambda now and print its tailed execution logs. Usage: make 
 	@docker compose run --rm --entrypoint sh -e AWS_DEFAULT_REGION=$(INFRA_REGION) awscli -c '\
 		NAME=$$(aws lambda list-functions --query "Functions[].FunctionName" --output text | tr "\t" "\n" | grep "^$(FN)-" | head -1); \
 		test -n "$$NAME" || { echo "❌  No function $(FN)-*"; exit 1; }; \
-		echo "==> invoking $$NAME ..."; \
-		aws lambda invoke --function-name "$$NAME" --log-type Tail --query LogResult --output text /tmp/payload >/tmp/b64; \
+		echo "==> invoking $$NAME (waiting for completion, up to the Lambda timeout) ..."; \
+		aws --cli-read-timeout 0 --cli-connect-timeout 60 lambda invoke --function-name "$$NAME" --log-type Tail --query LogResult --output text /tmp/payload >/tmp/b64; \
 		echo "--- payload ---"; cat /tmp/payload; echo; echo "--- log tail ---"; base64 -d /tmp/b64'
 
 .PHONY: test
