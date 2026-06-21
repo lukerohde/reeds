@@ -33,11 +33,14 @@ make logs FN=crawler SINCE=30m
 `make logs` resolves the hashed log group (`/aws/lambda/crawler-<hash>`) automatically and
 runs `aws logs tail` in the dockerised AWS CLI, using the deploy region from `Pulumi.prod.yaml`.
 
-### One-time IAM grant
+### IAM grant (provisioned by Pulumi)
 
-By default `make logs` fails with `AccessDeniedException ... logs:DescribeLogGroups` — the
-deploy user has no CloudWatch Logs read. Grant it once (needs IAM-admin creds, not the
-deploy user's own keys):
+The required CloudWatch Logs read is granted by Pulumi as an `aws.iam.UserPolicy`
+(`reeds-logs-read`) attached to the user named in `reeds:logsReaderUser`
+(`infra/pulumi/__main__.py`). It's applied on `make infra-up`. Installs that deploy
+via OIDC only (no long-lived user) just omit that config key.
+
+If you ever need to grant it by hand (e.g. before the first deploy), the equivalent is:
 
 ```bash
 aws iam put-user-policy \
@@ -45,20 +48,13 @@ aws iam put-user-policy \
   --policy-name reeds-logs-read \
   --policy-document '{
     "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": [
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams",
-        "logs:GetLogEvents",
-        "logs:FilterLogEvents",
-        "logs:StartQuery",
-        "logs:StopQuery",
-        "logs:GetQueryResults"
-      ],
-      "Resource": "arn:aws:logs:eu-west-1:872515291723:log-group:/aws/lambda/*"
-    }]
+    "Statement": [
+      {"Effect": "Allow", "Action": "logs:DescribeLogGroups", "Resource": "*"},
+      {"Effect": "Allow",
+       "Action": ["logs:DescribeLogStreams","logs:GetLogEvents","logs:FilterLogEvents"],
+       "Resource": "arn:aws:logs:eu-west-1:*:log-group:/aws/lambda/*"}
+    ]
   }'
 ```
 
-Verify: `make logs FN=crawler SINCE=2d` should now stream events.
+Verify: `make logs FN=crawler SINCE=2d` streams events.

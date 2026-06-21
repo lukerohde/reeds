@@ -3,3 +3,4 @@ config:
   lukerohde-reeds:domainName: reeds.lukeroh.de
   lukerohde-reeds:bucketName: lukerohde-reeds
   lukerohde-reeds:parentIngressStack: lukerohde/lukerohde-ingress/prod
+  lukerohde-reeds:logsReaderUser: lukerohde-pulumi-user

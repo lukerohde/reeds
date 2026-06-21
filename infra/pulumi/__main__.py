@@ -118,6 +118,36 @@ aws.iam.RolePolicy(
     })),
 )
 
+# ── Optional: let an operator IAM user read the Lambda logs ───────────────────
+# Grants CloudWatch Logs read on the reeds Lambda log groups so `make logs` can
+# tail them from that user's credentials. Opt-in via `reeds:logsReaderUser`;
+# installs that deploy via OIDC only (no long-lived user) simply omit it.
+logs_reader_user = config.get("logsReaderUser")
+if logs_reader_user:
+    aws.iam.UserPolicy(
+        "reeds-logs-read",
+        user=logs_reader_user,
+        policy=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [
+                # DescribeLogGroups does not support resource-level scoping.
+                {"Effect": "Allow", "Action": "logs:DescribeLogGroups", "Resource": "*"},
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:DescribeLogStreams",
+                        "logs:GetLogEvents",
+                        "logs:FilterLogEvents",
+                        "logs:StartQuery",
+                        "logs:StopQuery",
+                        "logs:GetQueryResults",
+                    ],
+                    "Resource": f"arn:aws:logs:{aws_region}:*:log-group:/aws/lambda/*",
+                },
+            ],
+        }),
+    )
+
 # ── Lambda: crawler ───────────────────────────────────────────────────────────
 crawler_zip = _lambda_archive("../../backend/crawler", {"config.yaml": "../../config/config.yaml"})
 
