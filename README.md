@@ -45,7 +45,8 @@ Run `make help` for the full list. The common ones:
 ```bash
 make crawl          # fetch RSS feeds + YouTube videos/transcripts → real DynamoDB
 make digest         # transform + curate → HTML → real S3
-make redigest       # reset today's articles and re-run digest
+make redigest       # reset today's articles and re-run digest (local Lambda code)
+make redigest-prod  # reset today + reprocess YouTube + invoke production Lambda
 make deploy         # sync public/ static assets to S3
 make infra-up       # deploy/update AWS infrastructure via Pulumi
 ```
