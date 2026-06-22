@@ -28,7 +28,7 @@ Everything tuneable lives in `config/config.yaml`:
 - **youtubers** — list of `{name, channel_id}` entries
 - **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`,
   `words_per_minute`, `summarise_long_threshold`, `youtube_lookback_days`, `max_videos_per_channel`
-- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `curate`
+- **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `youtube_summarise`, `curate`
 
 `max_per_author` caps how many articles a single author can contribute to the candidates pool.
 Without it, prolific authors (e.g. Simon Willison posts many times daily) dominate the pool and
@@ -57,8 +57,10 @@ make crawl          # fetch RSS + YouTube (if YOUTUBE_API_KEY set) → real Dyna
 make test-youtube-fetch    # print recent videos per channel, no DDB writes (needs YOUTUBE_API_KEY)
 make show-candidates       # show relevant unserved articles + summaries (local dev)
 make digest         # transform + curate → HTML → real S3
-make redigest       # reset today's articles and re-run digest
+make redigest       # reset today's articles and re-run digest (local Lambda code)
+make redigest-prod  # reset today + reprocess YouTube + invoke production Lambda (recommended)
 make reset-today    # unserve today's articles so digest can be re-run
+make reset-youtube-nosummary  # reset YouTube items with no detail so digest reprocesses them
 make reset-all      # ⚠️  delete all articles (use after schema changes)
 make test           # run all unit tests (crawler + digest)
 make test-digest    # run digest unit tests only (no LocalStack)
@@ -116,7 +118,11 @@ to iterate on prompts without re-fetching content.
 
 Each article item: `url` (PK), `author`, `title`, `published_date`, `fetched_date`,
 `served_date`, `word_count`, `content` (≤8000 chars), `status` (relevant/ignored),
-`summary`.
+`summary`, `detail`.
+
+`detail` is non-empty only for YouTube videos where the AI judged the content
+information-dense enough to warrant a full write-up. Rendered as a ▸ read more
+expandable section in the digest HTML. Empty string means "summary covers it".
 
 `served_date` is empty string until the digest serves the article (DynamoDB can't filter on NULL).
 
@@ -154,7 +160,7 @@ Three levels, increasing cost:
 
 Package build verification is embedded in `make build-lambdas` — it asserts that the
 expected dirs exist in `backend/*/packages/` after pip install (`feedparser`,
-`googleapiclient`, `youtube_transcript_api` for the crawler; `anthropic` for the digest),
+`googleapiclient`, `youtube_transcript_api` for the crawler; `anthropic`, `requests` for the digest),
 so a silent pip failure is caught immediately.
 
 ### Slash commands
@@ -183,22 +189,36 @@ Two sources ship today:
 
 YouTube items land in the same table as blogs, distinguished only by `source: 'youtube'`
 (plus a `video_id`). Their transcript is stored in `content` — exactly like a blog body —
-so the digest transforms them with the **same** `is_relevant()` + `make_summary()` path,
-with no source-specific branching. A video with no captions is stored with `content: ''`;
-the crawler retries its transcript on later runs (clearing `status`/`summary` so the digest
-reprocesses it on success). Until a transcript appears it's relevance-checked on the title
-alone and served without a summary — exactly how a content-less blog item behaves.
+so the digest relevance-checks them identically to blogs. The summarisation path
+differs by source:
+- **With transcript** (`content` set): `make_youtube_summary()` calls Claude with the
+  `youtube_summarise` prompt, which returns JSON `{summary, detail}`. Dense videos get a
+  `detail` field (300–1500 words) rendered as a ▸ read more expandable; simple videos
+  get `detail: null`.
+- **Without transcript** (`content: ''`): the Gemini fallback
+  (`gemini_summarise_video()`) is tried instead — Gemini can watch the video directly
+  via URL, bypassing the IP-block that prevents `youtube_transcript_api` from working on
+  Lambda. Same JSON `{summary, detail}` prompt, same DynamoDB fields. If Gemini is not
+  configured or fails, the video is relevance-checked on its title alone and served
+  without a summary.
 
-**Required API key (beyond `ANTHROPIC_API_KEY`):**
+The `youtube_summarise` prompt is shared between both paths (same instructions, different
+input: transcript text for Claude, video URL for Gemini).
+
+**Required API keys (beyond `ANTHROPIC_API_KEY`):**
 - `YOUTUBE_API_KEY` — YouTube Data API v3 key (read-only, free quota), injected into the
   crawler Lambda. Without it, the YouTube source is simply skipped.
+- `GOOGLE_API_KEY` — Gemini API key, injected into the digest Lambda. Without it the
+  Gemini fallback is skipped; transcript-less videos will have no summary.
 
 **Config fields (in `config/config.yaml`):**
 - `youtubers` — list of `{name, channel_id}` entries (verify IDs with `make test-youtube-fetch`)
 - `settings.youtube_lookback_days` — how far back to fetch videos per run (default: 7)
 - `settings.max_videos_per_channel` — max new videos per channel per crawl (default: 3)
 - `settings.summarise_long_threshold` — word count at/above which the TLDR prompt is used (default: 500)
-- `prompts.summarise_short` / `prompts.summarise_long` — short/long content prompts (blogs and videos alike)
+- `prompts.summarise_short` / `prompts.summarise_long` — short/long content prompts (blogs only)
+- `prompts.youtube_summarise` — shared JSON prompt for YouTube summarisation (Claude transcript
+  path + Gemini fallback); returns `{summary, detail}` — same prompt, different input
 
 **Local dev:**
 ```bash
@@ -212,6 +232,7 @@ make dev                   # ANTHROPIC_API_KEY required
 - `source: 'youtube'` — distinguishes from blog articles (blogs get `source: 'blog'`)
 - `video_id` — YouTube video ID (e.g. `dQw4w9WgXcQ`)
 - `content` — the transcript text (or `''` if captions were unavailable; retried next crawl)
+- `detail` — expanded write-up for dense videos (empty string if summary covers it)
 
 ## CI/CD
 
@@ -219,8 +240,8 @@ Push to `main` triggers:
 - `deploy-infra.yml` — on changes to `infra/`, `backend/`, `config/`
 - `deploy-site.yml` — on changes to `public/`
 
-GitHub secrets required: `PULUMI_ACCESS_TOKEN`, `ANTHROPIC_API_KEY` (plus
-`YOUTUBE_API_KEY` if YouTube is enabled).
+GitHub secrets required: `PULUMI_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`, `YOUTUBE_API_KEY`,
+`GOOGLE_API_KEY` (Gemini fallback for transcript-less YouTube videos).
 Standalone installs also need `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 aws-quill installs use OIDC (role ARN from parent ingress stack output).
 
