@@ -213,7 +213,8 @@ class TestGeminiSummariseVideo:
         mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': 'Great video.'}]}}]}
         with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
              patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
-             patch('handler.requests') as mock_requests:
+             patch('handler.requests') as mock_requests, \
+             patch('builtins.print'):
             mock_requests.post.return_value = mock_resp
             result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
         assert result == 'Great video.'

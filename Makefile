@@ -156,6 +156,14 @@ reset-today: ## Unserve today's articles so digest can be re-run
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		crawler python reset_today.py
 
+.PHONY: reset-youtube-nosummary
+reset-youtube-nosummary: ## Clear status+summary for YouTube items with no transcript (prod) so Gemini can reprocess them
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		crawler python reset_youtube_nosummary.py
+
 .PHONY: dev
 dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens in browser
 	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }

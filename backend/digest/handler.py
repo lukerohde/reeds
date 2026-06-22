@@ -114,7 +114,9 @@ def gemini_summarise_video(url):
             timeout=120,
         )
         r.raise_for_status()
-        return r.json()['candidates'][0]['content']['parts'][0]['text']
+        summary = r.json()['candidates'][0]['content']['parts'][0]['text']
+        print(f"  [gemini] summarised {url}")
+        return summary
     except Exception as e:
         print(f"  [gemini] failed for {url}: {type(e).__name__}: {e}")
         return ''
