@@ -26,8 +26,9 @@ for item in items:
         continue
     table.update_item(
         Key={'url': item['url']},
-        UpdateExpression='REMOVE #s, summary',
+        UpdateExpression='REMOVE #s, summary SET served_date = :e',
         ExpressionAttributeNames={'#s': 'status'},
+        ExpressionAttributeValues={':e': ''},
     )
     print(f"  reset: {item.get('author', '?')}: {item.get('title', item['url'])}")
     reset += 1
