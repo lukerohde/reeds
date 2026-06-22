@@ -19,6 +19,12 @@ youtubers:
     channel_id: UC5GSyi-1pcmPJrmlF5KpcKA
   - name: Lex Fridman
     channel_id: UCJIfeSCssxSC_Dhc5s7woww
+  - name: AI Engineer
+    channel_id: UCLKPca3kwwd-B59HNr-_lvA
+  - name: Beyond Coding
+    channel_id: UCdMz6KKEDW_1Qqas-ya7S6w
+  - name: Nate B Jones
+    channel_id: UC0C-17n9iuUQPylguM1d-lQ
 
 blogs:
   - author: Simon Willison
