@@ -199,3 +199,53 @@ class TestMakeSummaryWordCount:
             _h.make_summary('Title', 'Author', 'Content', word_count=_h.SUMMARISE_LONG_THRESHOLD)
         content = mock_ai.messages.create.call_args[1]['messages'][0]['content']
         assert any(w in content.lower() for w in ('tldr', 'distil', 'distill', 'insight'))
+
+
+# ── TestGeminiSummariseVideo ──────────────────────────────────────────────────
+
+class TestGeminiSummariseVideo:
+    """gemini_summarise_video calls Gemini REST endpoint and returns the summary text."""
+
+    def test_returns_summary_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': 'Great video.'}]}}]}
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
+             patch('handler.requests') as mock_requests:
+            mock_requests.post.return_value = mock_resp
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert result == 'Great video.'
+
+    def test_sends_youtube_url_and_thinking_disabled(self):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': 'Summary.'}]}}]}
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
+             patch('handler.requests') as mock_requests:
+            mock_requests.post.return_value = mock_resp
+            _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        _, kwargs = mock_requests.post.call_args
+        body = kwargs['json']
+        file_uri = body['contents'][0]['parts'][0]['fileData']['fileUri']
+        assert file_uri == 'https://www.youtube.com/watch?v=abc123'
+        assert body['generationConfig']['thinkingConfig']['thinkingBudget'] == 0
+
+    def test_returns_empty_when_no_api_key(self):
+        with patch.object(_h, 'GEMINI_API_KEY', ''), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'):
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert result == ''
+
+    def test_returns_empty_on_http_error(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = Exception('HTTP 500')
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
+             patch('handler.requests') as mock_requests:
+            mock_requests.post.return_value = mock_resp
+            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert result == ''

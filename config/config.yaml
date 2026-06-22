@@ -93,6 +93,10 @@ prompts:
 
     {text}
 
+  youtube_summarise: |
+    Write a dense 3-4 sentence summary of this video for a senior software engineer.
+    Cover the key technical insight and why it matters. No fluff, no markdown.
+
   curate: |
     You are curating a daily reading digest for senior software engineers.
 

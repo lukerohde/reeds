@@ -15,6 +15,8 @@ Required env vars (set in .env or GitHub secrets):
   ANTHROPIC_API_KEY  — Claude API key (digest Lambda)
   YOUTUBE_API_KEY    — YouTube Data API v3 key (crawler Lambda; optional, enables
                        the YouTube source when channels are configured)
+  GOOGLE_API_KEY     — Gemini API key (digest Lambda; optional, enables Gemini
+                       fallback for YouTube videos without transcripts)
 """
 
 import os
@@ -179,6 +181,7 @@ digest = aws.lambda_.Function(
         "BUCKET_NAME":         site.bucket_name,
         "CF_DISTRIBUTION_ID":  site.distribution_id,
         "ANTHROPIC_API_KEY":   os.environ.get("ANTHROPIC_API_KEY", ""),
+        "GOOGLE_API_KEY":      os.environ.get("GOOGLE_API_KEY", ""),
     }),
 )
 

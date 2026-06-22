@@ -96,12 +96,14 @@ ANTHROPIC_API_KEY=
 DYNAMODB_TABLE=reeds-articles
 # Optional — YouTube integration:
 # YOUTUBE_API_KEY=
+# Optional — Gemini fallback for YouTube videos without transcripts:
+# GOOGLE_API_KEY=
 ```
 
 ## CI/CD
 
 GitHub secrets: `PULUMI_ACCESS_TOKEN` (+ `ANTHROPIC_API_KEY` for infra deploy; plus
-`YOUTUBE_API_KEY` if YouTube is enabled).
+`YOUTUBE_API_KEY` if YouTube is enabled; plus `GOOGLE_API_KEY` for Gemini fallback).
 AWS credentials via OIDC from the parent ingress stack — no AWS keys stored in GitHub.
 
 Push to `main` triggers:

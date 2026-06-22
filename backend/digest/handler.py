@@ -2,6 +2,7 @@ import os
 import re
 import yaml
 import boto3
+import requests
 import anthropic
 from pathlib import Path
 from datetime import datetime, timezone
@@ -19,12 +20,19 @@ SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
 SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
 SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
+YOUTUBE_SUMMARISE     = _cfg['prompts'].get('youtube_summarise', '')
 CURATE                = _cfg['prompts']['curate']
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
 BUCKET_NAME     = os.environ['BUCKET_NAME']
 CF_DIST_ID      = os.environ.get('CF_DISTRIBUTION_ID', '')
 DRY_RUN         = os.environ.get('DIGEST_DRY_RUN', '') == '1'
+
+# Gemini summarises YouTube videos directly from their URL when no transcript is
+# available (youtube_transcript_api is IP-blocked from cloud hosts like Lambda).
+# It's an authenticated Google API call, so it isn't subject to that block.
+GEMINI_API_KEY  = os.environ.get('GOOGLE_API_KEY', '')
+GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
 
 MELBOURNE = ZoneInfo('Australia/Melbourne')
 
@@ -84,20 +92,54 @@ def make_summary(title, author, content, word_count=0):
     return msg.content[0].text
 
 
+def gemini_summarise_video(url):
+    """Summarise a YouTube video directly from its URL via Gemini.
+
+    Used when no transcript could be fetched (captions disabled, age-restricted,
+    or the IP block on cloud hosts). Returns '' if Gemini is not configured or fails.
+    """
+    if not GEMINI_API_KEY or not YOUTUBE_SUMMARISE:
+        return ''
+    try:
+        body = {
+            'contents': [{'parts': [
+                {'fileData': {'fileUri': url}},
+                {'text': YOUTUBE_SUMMARISE},
+            ]}],
+            'generationConfig': {'thinkingConfig': {'thinkingBudget': 0}},
+        }
+        r = requests.post(
+            GEMINI_ENDPOINT, json=body,
+            headers={'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY},
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.json()['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        print(f"  [gemini] failed for {url}: {type(e).__name__}: {e}")
+        return ''
+
+
 def transform(items):
     """Relevance-check and summarise unprocessed items. Updates DDB in place.
 
-    Every item — blog article or YouTube transcript — is handled identically:
-    its `content` text drives the relevance check and the summary. Items stored
-    without content (e.g. a video with no captions) are relevance-checked on the
-    title alone and served without a summary; the crawler keeps retrying their
-    content on later runs.
+    Blogs and YouTube transcripts share one path: their `content` text drives
+    the relevance check and the summary. A YouTube item with no transcript is the
+    one exception — Gemini summarises it straight from the video URL, and that
+    output doubles as both the relevance signal and the stored summary (no second
+    Claude call). If Gemini is unavailable the video is relevance-checked on its
+    title and served without a summary; the crawler keeps retrying its transcript.
     """
     for item in items:
         if item.get('status'):
             continue
 
-        content = item.get('content', '')
+        content       = item.get('content', '')
+        ready_summary = None  # set when content IS already a summary (Gemini path)
+
+        if item.get('source') == 'youtube' and not content:
+            ready_summary = gemini_summarise_video(item['url'])
+            content       = ready_summary  # use as the relevance signal
 
         if not is_relevant(item['title'], content):
             item['status'] = 'ignored'
@@ -110,7 +152,9 @@ def transform(items):
             print(f"  [ignored]  {item['author']}: {item['title']}")
             continue
 
-        summary = make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
+        summary = ready_summary if ready_summary is not None else (
+            make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
+        )
         item['status']  = 'relevant'
         item['summary'] = summary
         table.update_item(

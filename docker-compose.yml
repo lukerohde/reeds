@@ -42,6 +42,7 @@ services:
       BUCKET_NAME: ${BUCKET_NAME:-}
       CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
 
   # ── Pulumi — reeds infra (make infra-*) ───────────────────────────────────────
@@ -63,6 +64,7 @@ services:
       PULUMI_SKIP_UPDATE_CHECK: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
 
   # ── AWS CLI — deploy: s3 sync + CloudFront invalidation (make deploy) ─────────
   awscli:
