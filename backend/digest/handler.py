@@ -352,7 +352,7 @@ def handler(event, context):
                     DistributionId=CF_DIST_ID,
                     InvalidationBatch={
                         'Paths': {'Quantity': 2, 'Items': ['/digest/latest/*', f'/digest/{date_str}/*']},
-                        'CallerReference': date_str,
+                        'CallerReference': today.strftime('%Y-%m-%dT%H:%M:%S'),
                     },
                 )
                 print(f"[digest] CloudFront invalidation created for {CF_DIST_ID}")

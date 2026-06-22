@@ -15,14 +15,16 @@ from boto3.dynamodb.conditions import Attr
 
 table = boto3.resource('dynamodb').Table(os.environ['DYNAMODB_TABLE'])
 
-response = table.scan(
-    FilterExpression=Attr('source').eq('youtube') & Attr('content').eq('')
-)
+response = table.scan(FilterExpression=Attr('source').eq('youtube'))
 items = response['Items']
 
 reset = 0
 for item in items:
     if not item.get('status'):
+        continue
+    # Reset items with no transcript (Gemini path) OR with transcript but no detail yet
+    needs_reset = not item.get('content') or 'detail' not in item
+    if not needs_reset:
         continue
     table.update_item(
         Key={'url': item['url']},
@@ -30,7 +32,8 @@ for item in items:
         ExpressionAttributeNames={'#s': 'status'},
         ExpressionAttributeValues={':e': ''},
     )
-    print(f"  reset: {item.get('author', '?')}: {item.get('title', item['url'])}")
+    reason = 'no transcript' if not item.get('content') else 'no detail'
+    print(f"  reset ({reason}): {item.get('author', '?')}: {item.get('title', item['url'])}")
     reset += 1
 
-print(f"\nReset {reset} of {len(items)} YouTube items with no transcript.")
+print(f"\nReset {reset} of {len(items)} YouTube items.")
