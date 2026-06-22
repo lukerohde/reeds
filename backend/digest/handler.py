@@ -21,8 +21,7 @@ SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
 SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
 SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
-YOUTUBE_SUMMARISE            = _cfg['prompts'].get('youtube_summarise', '')
-YOUTUBE_TRANSCRIPT_SUMMARISE = _cfg['prompts'].get('youtube_transcript_summarise', '')
+YOUTUBE_SUMMARISE = _cfg['prompts'].get('youtube_summarise', '')
 CURATE                = _cfg['prompts']['curate']
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
@@ -97,15 +96,16 @@ def make_summary(title, author, content, word_count=0):
 def make_youtube_summary(title, author, content):
     """Summarise a YouTube transcript via Claude, returning (summary, detail) tuple.
 
-    Used for YouTube items that have a transcript. Returns (summary, '') if the
-    prompt is not configured or parsing fails.
+    Uses the shared youtube_summarise prompt — same instructions as Gemini, just
+    fed a text transcript instead of a video URL. Falls back to plain summary if
+    the prompt is not configured or JSON parsing fails.
     """
-    if not YOUTUBE_TRANSCRIPT_SUMMARISE:
+    if not YOUTUBE_SUMMARISE:
         return make_summary(title, author, content), ''
     msg = ai.messages.create(
         model='claude-sonnet-4-6',
         max_tokens=2500,
-        messages=[{'role': 'user', 'content': YOUTUBE_TRANSCRIPT_SUMMARISE.format(
+        messages=[{'role': 'user', 'content': YOUTUBE_SUMMARISE.format(
             title=title, author=author, text=content,
         )}],
     )
@@ -136,7 +136,7 @@ def gemini_summarise_video(url):
         body = {
             'contents': [{'parts': [
                 {'fileData': {'fileUri': url}},
-                {'text': YOUTUBE_SUMMARISE},
+                {'text': YOUTUBE_SUMMARISE.format(title='', author='', text='')},
             ]}],
             'generationConfig': {'thinkingConfig': {'thinkingBudget': 0}},
         }
