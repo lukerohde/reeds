@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import yaml
 import boto3
 import requests
@@ -96,10 +97,12 @@ def gemini_summarise_video(url):
     """Summarise a YouTube video directly from its URL via Gemini.
 
     Used when no transcript could be fetched (captions disabled, age-restricted,
-    or the IP block on cloud hosts). Returns '' if Gemini is not configured or fails.
+    or the IP block on cloud hosts). Returns (summary, detail) tuple; both are
+    empty strings if Gemini is not configured or fails. detail is non-empty only
+    for information-dense videos where a full write-up adds value.
     """
     if not GEMINI_API_KEY or not YOUTUBE_SUMMARISE:
-        return ''
+        return '', ''
     try:
         body = {
             'contents': [{'parts': [
@@ -114,12 +117,20 @@ def gemini_summarise_video(url):
             timeout=120,
         )
         r.raise_for_status()
-        summary = r.json()['candidates'][0]['content']['parts'][0]['text']
-        print(f"  [gemini] summarised {url}")
-        return summary
+        text = r.json()['candidates'][0]['content']['parts'][0]['text']
+        # Strip markdown code fences Gemini sometimes wraps around JSON
+        text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text.strip())
+        data = json.loads(text)
+        summary = data.get('summary') or ''
+        detail  = data.get('detail') or ''
+        if isinstance(detail, str) and detail.strip().lower() in ('null', 'none'):
+            detail = ''
+        label = ' (+detail)' if detail else ''
+        print(f"  [gemini] summarised {url}{label}")
+        return summary, detail
     except Exception as e:
         print(f"  [gemini] failed for {url}: {type(e).__name__}: {e}")
-        return ''
+        return '', ''
 
 
 def transform(items):
@@ -138,10 +149,11 @@ def transform(items):
 
         content       = item.get('content', '')
         ready_summary = None  # set when content IS already a summary (Gemini path)
+        ready_detail  = None
 
         if item.get('source') == 'youtube' and not content:
-            ready_summary = gemini_summarise_video(item['url'])
-            content       = ready_summary  # use as the relevance signal
+            ready_summary, ready_detail = gemini_summarise_video(item['url'])
+            content = ready_summary  # use as the relevance signal
 
         if not is_relevant(item['title'], content):
             item['status'] = 'ignored'
@@ -157,13 +169,15 @@ def transform(items):
         summary = ready_summary if ready_summary is not None else (
             make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''
         )
+        detail = ready_detail if ready_detail is not None else ''
         item['status']  = 'relevant'
         item['summary'] = summary
+        item['detail']  = detail
         table.update_item(
             Key={'url': item['url']},
-            UpdateExpression='SET #s = :s, summary = :m',
+            UpdateExpression='SET #s = :s, summary = :m, detail = :d',
             ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': 'relevant', ':m': summary},
+            ExpressionAttributeValues={':s': 'relevant', ':m': summary, ':d': detail},
         )
         print(f"  [relevant] {item['author']}: {item['title']}")
 
@@ -219,6 +233,15 @@ def _md_to_html(text):
     return text
 
 
+def _detail_to_html(text):
+    """Convert Gemini detail prose (paragraphs + bold/italic) to HTML paragraphs."""
+    paragraphs = re.split(r'\n\n+', text.strip())
+    return ''.join(
+        f'<p>{_md_to_html(p.strip())}</p>'
+        for p in paragraphs if p.strip()
+    )
+
+
 def build_html(articles, date_str, prev_date_str):
     items_html = ''
     for a in articles:
@@ -227,11 +250,19 @@ def build_html(articles, date_str, prev_date_str):
         if read_time:
             meta_parts.append(read_time)
         meta = ' · '.join(p for p in meta_parts if p)
+        detail     = a.get('detail', '')
+        detail_html = ''
+        if detail:
+            detail_html = f"""
+      <details class="detail">
+        <summary>read more</summary>
+        <div class="detail-body">{_detail_to_html(detail)}</div>
+      </details>"""
         items_html += f"""
     <article>
       <h2><a href="{a['url']}">{a['title']}</a></h2>
       <p class="meta">{meta}</p>
-      <p class="summary">{_md_to_html(a.get('summary', ''))}</p>
+      <p class="summary">{_md_to_html(a.get('summary', ''))}</p>{detail_html}
     </article>"""
 
     prev_link = (

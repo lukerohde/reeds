@@ -94,8 +94,13 @@ prompts:
     {text}
 
   youtube_summarise: |
-    Write a dense 3-4 sentence summary of this video for a senior software engineer.
-    Cover the key technical insight and why it matters. No fluff, no markdown.
+    You are summarising a YouTube video for a senior software engineer's daily reading digest.
+
+    Return ONLY a JSON object — no markdown, no code blocks, no preamble:
+    {
+      "summary": "3-4 dense sentences: the core idea and key takeaways for a senior engineer. No fluff.",
+      "detail": "For information-dense videos (tutorials, deep-dives, research, multi-topic explorations): 300-500 words of structured prose expanding on key techniques, findings, architecture decisions, or concrete examples a senior engineer would care about. Use paragraphs separated by blank lines. Bold key terms with **asterisks**. For short or simple videos where the summary already covers everything (opinion pieces, single announcements, YouTube Shorts), use null."
+    }
 
   curate: |
     You are curating a daily reading digest for senior software engineers.

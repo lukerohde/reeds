@@ -5,6 +5,7 @@ Run via:
     make test-digest
 """
 import os
+import json
 from unittest.mock import patch, MagicMock
 
 # Set env vars before importing the handler so module-level assignments don't KeyError
@@ -206,28 +207,54 @@ class TestMakeSummaryWordCount:
 class TestGeminiSummariseVideo:
     """gemini_summarise_video calls Gemini REST endpoint and returns the summary text."""
 
-    def test_returns_summary_on_success(self):
+
+    def _json_resp(self, summary, detail=None):
+        payload = json.dumps({'summary': summary, 'detail': detail})
         mock_resp = MagicMock()
-        mock_resp.ok = True
         mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': 'Great video.'}]}}]}
+        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': payload}]}}]}
+        return mock_resp
+
+    def test_returns_summary_on_success(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
+             patch('handler.requests') as mock_requests, \
+             patch('builtins.print'):
+            mock_requests.post.return_value = self._json_resp('Great video.')
+            summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert summary == 'Great video.'
+        assert detail == ''
+
+    def test_returns_detail_when_present(self):
+        with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
+             patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
+             patch('handler.requests') as mock_requests, \
+             patch('builtins.print'):
+            mock_requests.post.return_value = self._json_resp('Short summary.', 'Long detail paragraph one.\n\nParagraph two.')
+            summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert summary == 'Short summary.'
+        assert detail == 'Long detail paragraph one.\n\nParagraph two.'
+
+    def test_strips_markdown_code_fence(self):
+        payload = '```json\n{"summary": "Fenced.", "detail": null}\n```'
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': payload}]}}]}
         with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
              patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
              patch('handler.requests') as mock_requests, \
              patch('builtins.print'):
             mock_requests.post.return_value = mock_resp
-            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
-        assert result == 'Great video.'
+            summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert summary == 'Fenced.'
+        assert detail == ''
 
     def test_sends_youtube_url_and_thinking_disabled(self):
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {'candidates': [{'content': {'parts': [{'text': 'Summary.'}]}}]}
         with patch.object(_h, 'GEMINI_API_KEY', 'test-key'), \
              patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
-             patch('handler.requests') as mock_requests:
-            mock_requests.post.return_value = mock_resp
+             patch('handler.requests') as mock_requests, \
+             patch('builtins.print'):
+            mock_requests.post.return_value = self._json_resp('Summary.')
             _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
         _, kwargs = mock_requests.post.call_args
         body = kwargs['json']
@@ -238,8 +265,9 @@ class TestGeminiSummariseVideo:
     def test_returns_empty_when_no_api_key(self):
         with patch.object(_h, 'GEMINI_API_KEY', ''), \
              patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'):
-            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
-        assert result == ''
+            summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert summary == ''
+        assert detail == ''
 
     def test_returns_empty_on_http_error(self):
         mock_resp = MagicMock()
@@ -248,5 +276,6 @@ class TestGeminiSummariseVideo:
              patch.object(_h, 'YOUTUBE_SUMMARISE', 'Summarise this.'), \
              patch('handler.requests') as mock_requests:
             mock_requests.post.return_value = mock_resp
-            result = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
-        assert result == ''
+            summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
+        assert summary == ''
+        assert detail == ''
