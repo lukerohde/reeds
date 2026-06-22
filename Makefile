@@ -148,6 +148,12 @@ redigest: ## Re-run today's digest (unserve today's articles then re-digest)
 	$(MAKE) reset-today
 	$(MAKE) digest
 
+.PHONY: redigest-prod
+redigest-prod: ## Full prod redigest: unserve today + reprocess YouTube + invoke production Lambda
+	$(MAKE) reset-today
+	$(MAKE) reset-youtube-nosummary
+	$(MAKE) invoke FN=digest
+
 .PHONY: reset-today
 reset-today: ## Unserve today's articles so digest can be re-run
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }

@@ -22,8 +22,9 @@ reset = 0
 for item in items:
     if not item.get('status'):
         continue
-    # Reset items with no transcript (Gemini path) OR with transcript but no detail yet
-    needs_reset = not item.get('content') or 'detail' not in item
+    # Reset items with no transcript (Gemini path) OR that have no meaningful detail yet
+    # (detail='' means old code set it empty; treat same as missing)
+    needs_reset = not item.get('content') or not item.get('detail')
     if not needs_reset:
         continue
     table.update_item(
