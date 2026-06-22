@@ -21,7 +21,8 @@ SUMMARISE_LONG_THRESHOLD = _cfg['settings'].get('summarise_long_threshold', 500)
 RELEVANCE_CHECK       = _cfg['prompts']['relevance_check']
 SUMMARISE_SHORT       = _cfg['prompts'].get('summarise_short', '')
 SUMMARISE_LONG        = _cfg['prompts'].get('summarise_long', SUMMARISE_SHORT)
-YOUTUBE_SUMMARISE     = _cfg['prompts'].get('youtube_summarise', '')
+YOUTUBE_SUMMARISE            = _cfg['prompts'].get('youtube_summarise', '')
+YOUTUBE_TRANSCRIPT_SUMMARISE = _cfg['prompts'].get('youtube_transcript_summarise', '')
 CURATE                = _cfg['prompts']['curate']
 
 TABLE_NAME      = os.environ['DYNAMODB_TABLE']
@@ -91,6 +92,34 @@ def make_summary(title, author, content, word_count=0):
         messages=[{'role': 'user', 'content': prompt.format(title=title, author=author, text=content)}],
     )
     return msg.content[0].text
+
+
+def make_youtube_summary(title, author, content):
+    """Summarise a YouTube transcript via Claude, returning (summary, detail) tuple.
+
+    Used for YouTube items that have a transcript. Returns (summary, '') if the
+    prompt is not configured or parsing fails.
+    """
+    if not YOUTUBE_TRANSCRIPT_SUMMARISE:
+        return make_summary(title, author, content), ''
+    msg = ai.messages.create(
+        model='claude-sonnet-4-6',
+        max_tokens=2500,
+        messages=[{'role': 'user', 'content': YOUTUBE_TRANSCRIPT_SUMMARISE.format(
+            title=title, author=author, text=content,
+        )}],
+    )
+    text = re.sub(r'^```(?:json)?\s*|\s*```$', '', msg.content[0].text.strip())
+    try:
+        data    = json.loads(text)
+        summary = data.get('summary') or ''
+        detail  = data.get('detail') or ''
+        if isinstance(detail, str) and detail.strip().lower() in ('null', 'none'):
+            detail = ''
+        return summary, detail
+    except Exception as e:
+        print(f"  [claude] JSON parse failed for {title}: {e}")
+        return msg.content[0].text, ''
 
 
 def gemini_summarise_video(url):
@@ -165,6 +194,9 @@ def transform(items):
             )
             print(f"  [ignored]  {item['author']}: {item['title']}")
             continue
+
+        if item.get('source') == 'youtube' and content and ready_summary is None:
+            ready_summary, ready_detail = make_youtube_summary(item['title'], item['author'], content)
 
         summary = ready_summary if ready_summary is not None else (
             make_summary(item['title'], item['author'], content, word_count=item.get('word_count', 0)) if content else ''

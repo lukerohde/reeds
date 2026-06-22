@@ -93,6 +93,24 @@ prompts:
 
     {text}
 
+  youtube_transcript_summarise: |
+    Summarise this YouTube video transcript for a senior software engineer's daily reading digest.
+
+    Return ONLY a JSON object with two fields:
+    - "summary": 3-4 dense sentences covering the core idea and key takeaways. No fluff.
+    - "detail": For information-dense videos (tutorials, deep-dives, research): 300-1500 words of
+      structured prose covering key techniques, findings, architecture decisions, and concrete
+      examples a senior engineer would care about. Use paragraphs separated by blank lines.
+      Bold key terms with **asterisks**. For short or simple videos where the summary covers
+      everything (opinion pieces, single announcements, YouTube Shorts), use null.
+
+    Return ONLY valid JSON, no code blocks, no preamble.
+
+    Title: {title}
+    Author: {author}
+
+    {text}
+
   youtube_summarise: |
     You are summarising a YouTube video for a senior software engineer's daily reading digest.
 
