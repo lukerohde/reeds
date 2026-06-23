@@ -64,30 +64,40 @@ def get_recent_videos(youtube, channel_id, since, max_videos):
 
     The uploads playlist ID is derived by replacing the 'UC' prefix of a
     channel ID with 'UU'. This is a well-known YouTube convention.
+
+    Paginates through results (50 per page) until max_videos is reached or a
+    video older than `since` is encountered — whichever comes first.
     """
     uploads_playlist = 'UU' + channel_id[2:]
-    response = youtube.playlistItems().list(
-        part='snippet',
-        playlistId=uploads_playlist,
-        maxResults=50,
-    ).execute()
-
     videos = []
-    for item in response.get('items', []):
-        snippet       = item['snippet']
-        published_str = snippet['publishedAt']
-        published_dt  = datetime.fromisoformat(published_str.rstrip('Z')).replace(tzinfo=timezone.utc)
-        if published_dt < since:
+    page_token = None
+
+    while True:
+        kwargs = dict(part='snippet', playlistId=uploads_playlist, maxResults=50)
+        if page_token:
+            kwargs['pageToken'] = page_token
+        response = youtube.playlistItems().list(**kwargs).execute()
+
+        for item in response.get('items', []):
+            snippet       = item['snippet']
+            published_str = snippet['publishedAt']
+            published_dt  = datetime.fromisoformat(published_str.rstrip('Z')).replace(tzinfo=timezone.utc)
+            if published_dt < since:
+                return videos
+            video_id = snippet['resourceId']['videoId']
+            videos.append({
+                'video_id':       video_id,
+                'url':            f'https://www.youtube.com/watch?v={video_id}',
+                'title':          snippet['title'],
+                'published_date': published_str,
+            })
+            if len(videos) >= max_videos:
+                return videos
+
+        page_token = response.get('nextPageToken')
+        if not page_token:
             break
-        video_id = snippet['resourceId']['videoId']
-        videos.append({
-            'video_id':       video_id,
-            'url':            f'https://www.youtube.com/watch?v={video_id}',
-            'title':          snippet['title'],
-            'published_date': published_str,
-        })
-        if len(videos) >= max_videos:
-            break
+
     return videos
 
 
