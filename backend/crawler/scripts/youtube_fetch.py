@@ -16,7 +16,7 @@ from googleapiclient.discovery import build
 
 from sources import get_recent_videos
 
-_cfg          = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
+_cfg          = yaml.safe_load((Path(__file__).parent.parent / 'config.yaml').read_text())
 YOUTUBERS     = _cfg.get('youtubers', [])
 LOOKBACK_DAYS = _cfg['settings'].get('youtube_lookback_days', 7)
 MAX_PER_CHAN  = _cfg['settings'].get('max_videos_per_channel', 3)
