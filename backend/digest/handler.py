@@ -302,10 +302,12 @@ def build_html(articles, date_str, prev_date_str):
         if prev_date_str else ''
     )
 
+    prev_url = f'/digest/{prev_date_str}/' if prev_date_str else ''
     return (TEMPLATE
             .replace('%HEADING%', f'Daily Digest — {date_str}')
             .replace('%ITEMS%', items_html)
-            .replace('%PREV_LINK%', prev_link))
+            .replace('%PREV_LINK%', prev_link)
+            .replace('%PREV_URL%', prev_url))
 
 
 # ── Handler ───────────────────────────────────────────────────────────────────
