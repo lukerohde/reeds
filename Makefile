@@ -31,7 +31,7 @@ show-candidates: ## Show all relevant unserved articles and their summaries (loc
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		crawler python show_candidates.py
+		crawler python scripts/show_candidates.py
 
 .PHONY: diagnose-author
 diagnose-author: ## Show DDB stats for an author. Usage: make diagnose-author AUTHOR="Simon Willison"
@@ -41,17 +41,17 @@ diagnose-author: ## Show DDB stats for an author. Usage: make diagnose-author AU
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		-e "AUTHOR=$(AUTHOR)" \
-		crawler python diagnose_author.py
+		crawler python scripts/diagnose_author.py
 
 .PHONY: test-feed
 test-feed: ## Test a feed URL. Usage: make test-feed FEED=https://example.com/feed.xml
 	@test -n "$(FEED)" || { echo "❌  Usage: make test-feed FEED=https://example.com/feed.xml"; exit 1; }
-	@docker compose run --rm crawler python test_feed.py $(FEED)
+	@docker compose run --rm crawler python scripts/test_feed.py $(FEED)
 
 .PHONY: add-youtuber
 add-youtuber: ## Resolve a YouTube handle/URL to its channel ID and add it to config. Usage: make add-youtuber HANDLE=@buildwithdc
 	@test -n "$(HANDLE)" || { echo "❌  Usage: make add-youtuber HANDLE=@handle  (or a channel URL / UC… ID)"; exit 1; }
-	@docker compose run --rm crawler python add_youtuber.py "$(HANDLE)"
+	@docker compose run --rm crawler python scripts/add_youtuber.py "$(HANDLE)"
 
 .PHONY: logs
 logs: ## Tail a Lambda's CloudWatch logs. Usage: make logs FN=crawler|digest [SINCE=1h]  (needs the reeds-logs-read IAM grant)
@@ -107,7 +107,7 @@ test-youtube-fetch: ## Fetch recent videos for each channel and print them (no D
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
-		crawler python youtube_fetch.py
+		crawler python scripts/youtube_fetch.py
 
 .PHONY: crawl
 crawl: ## Run crawler Lambda locally (RSS feeds + YouTube → DynamoDB; YouTube needs YOUTUBE_API_KEY)
@@ -141,7 +141,7 @@ reset-all: ## ⚠️  Delete ALL articles from DDB and re-crawl (use after schem
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		crawler python reset_all.py
+		crawler python scripts/reset_all.py
 
 .PHONY: redigest
 redigest: ## Re-run today's digest (unserve today's articles then re-digest)
@@ -160,7 +160,7 @@ reset-today: ## Unserve today's articles so digest can be re-run
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		crawler python reset_today.py
+		crawler python scripts/reset_today.py
 
 .PHONY: reset-youtube-nosummary
 reset-youtube-nosummary: ## Clear status+summary for YouTube items with no transcript (prod) so Gemini can reprocess them
@@ -168,7 +168,7 @@ reset-youtube-nosummary: ## Clear status+summary for YouTube items with no trans
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		crawler python reset_youtube_nosummary.py
+		crawler python scripts/reset_youtube_nosummary.py
 
 .PHONY: dev
 dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens in browser
@@ -225,7 +225,7 @@ local-reset: ## Delete all local articles from LocalStack (re-run local-crawl to
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		crawler python local_reset.py
+		crawler python scripts/local_reset.py
 
 .PHONY: local-soft-reset
 local-soft-reset: ## Clear AI fields (status/summary) from local articles, keep content (prompt engineering)
@@ -237,7 +237,7 @@ local-soft-reset: ## Clear AI fields (status/summary) from local articles, keep 
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		crawler python local_soft_reset.py
+		crawler python scripts/local_soft_reset.py
 
 .PHONY: local-crawl
 local-crawl: ## Fetch RSS feeds (+ YouTube if YOUTUBE_API_KEY set) → LocalStack DynamoDB
