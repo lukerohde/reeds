@@ -52,33 +52,58 @@ from the page — no API key needed — and appends it to `config.yaml`).
 
 ## Common commands
 
+**Production (hit real AWS):**
 ```bash
-make crawl          # fetch RSS + YouTube (if YOUTUBE_API_KEY set) → real DynamoDB
-make test-youtube-fetch    # print recent videos per channel, no DDB writes (needs YOUTUBE_API_KEY)
-make show-candidates       # show relevant unserved articles + summaries (local dev)
-make digest         # transform + curate → HTML → real S3
+make crawl          # fetch RSS + YouTube → prod DynamoDB
+make digest         # AI summarise + curate → HTML → prod S3
 make redigest       # reset today's articles and re-run digest (local Lambda code)
 make redigest-prod  # reset today + reprocess YouTube + invoke production Lambda (recommended)
+make rerender-pages # re-render ALL historical pages with current template (no AI cost)
 make reset-today    # unserve today's articles so digest can be re-run
 make reset-youtube-nosummary  # reset YouTube items with no detail so digest reprocesses them
 make reset-all      # ⚠️  delete all articles (use after schema changes)
-make test           # run all unit tests (crawler + digest)
-make test-digest    # run digest unit tests only (no LocalStack)
-make add-youtuber HANDLE=@handle   # resolve a YouTube handle/URL → channel ID → add to config
-make invoke FN=crawler     # trigger a Lambda now + print its tailed execution logs (also FN=digest)
+make invoke FN=crawler     # trigger a Lambda now + tail its logs (also FN=digest)
 make logs FN=crawler SINCE=2d   # tail a Lambda's CloudWatch logs (needs reeds-logs-read IAM grant)
-make diagnose-author AUTHOR="Simon Willison"  # query DDB stats for an author
-make test-feed FEED=<url>  # discover and verify a feed URL
 make deploy         # sync public/ assets to S3 + invalidate CloudFront
 make build-lambdas  # install pip deps into backend/*/packages/ (auto-run by infra-up)
 make infra-up       # deploy/update AWS infrastructure via Pulumi
 make infra-outputs  # show bucket, CloudFront ID, etc.
+```
 
-make local-up               # start LocalStack (DynamoDB + S3)
-make local-crawl            # crawl → LocalStack DynamoDB (no AI; YouTube if YOUTUBE_API_KEY set)
-make local-reset            # delete all local articles (re-run local-crawl to start fresh)
-make local-soft-reset       # clear AI fields only (status/summary) — keep content, re-run AI
-make dev                    # digest → preview HTML → open in browser (AI needed, no AWS)
+**Local (LocalStack — no real AWS writes):**
+```bash
+make local-up           # start LocalStack, create DynamoDB table + S3 bucket (idempotent)
+make local-clone-prod   # clone prod DynamoDB + S3 digest pages → LocalStack (read-only on prod)
+make local-crawl        # crawl RSS + YouTube → LocalStack DynamoDB (no AI)
+make local-digest       # AI summarise + curate → HTML → LocalStack S3 (marks articles served)
+make local-rerender     # re-render all historical pages with current template → LocalStack S3
+make local-reset        # delete all local articles
+make local-soft-reset   # clear AI fields only (status/summary) — keep content, re-run AI
+make serve              # sync LocalStack S3 → /tmp and serve over HTTP on :8080
+make dev                # dry-run digest: AI summarise → /tmp/reeds-digest-preview.html (no S3/DDB writes)
+```
+
+**Prod ↔ local equivalents:**
+
+| Goal | Production | Local |
+|---|---|---|
+| Fetch articles | `make crawl` | `make local-crawl` |
+| Run full digest | `make redigest-prod` | `make local-digest` |
+| Preview digest (no saves) | — | `make dev` |
+| Re-render all pages | `make rerender-pages` | `make local-rerender` |
+| Browse in browser | live CloudFront URL | `make serve` → http://localhost:8080/digest/latest/ |
+| Seed local with real data | — | `make local-clone-prod` |
+
+**Utility / test:**
+```bash
+make test                          # run all unit tests (crawler + digest)
+make test-digest                   # run digest unit tests only (no LocalStack)
+make test-youtube-fetch            # print recent videos per channel (needs YOUTUBE_API_KEY)
+make show-candidates               # show relevant unserved articles + summaries
+make add-youtuber HANDLE=@handle   # resolve YouTube handle → channel ID → add to config
+make diagnose-author AUTHOR="..."  # query DDB stats for an author
+make test-feed FEED=<url>          # discover and verify a feed URL
+make dev-scroll-test               # serve two fake digest pages for infinite scroll testing
 ```
 
 ## Local development
@@ -113,6 +138,10 @@ to iterate on prompts without re-fetching content.
   running and print a clear error if it isn't.
 - `served_date` is stored in Melbourne timezone (by the digest handler). `reset-today` matches
   this — do not change it to UTC or articles served near midnight won't be found.
+- `make dev` is dry-run — articles are NOT marked as served. Use `make local-digest` when you
+  need served articles (e.g. before `make local-rerender` or `make serve`).
+- `make local-clone-prod` is the fastest way to get realistic test data locally — copies all
+  prod DynamoDB items and S3 digest pages to LocalStack in one step.
 
 ## DynamoDB schema
 

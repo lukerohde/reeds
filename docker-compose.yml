@@ -44,6 +44,7 @@ services:
       CF_DISTRIBUTION_ID: ${CF_DISTRIBUTION_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      PYTHONPATH: /app/backend/digest
     entrypoint: ["sh", "-c", "pip install -q -r requirements.txt && exec \"$@\"", "--"]
 
   # ── Pulumi — reeds infra (make infra-*) ───────────────────────────────────────

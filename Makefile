@@ -135,6 +135,61 @@ digest: ## Run digest Lambda locally (DynamoDB → summary HTML → S3)
 		digester \
 		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
 
+.PHONY: rerender-pages
+rerender-pages: ## Re-render all historical digest pages with the current template (picks up infinite scroll, read-more, etc.)
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
+	CFID=$${CF_DISTRIBUTION_ID:-$$(docker compose run --rm -T pulumi stack output reeds_distribution_id 2>/dev/null | tail -1)}; \
+	test -n "$$BUCKET" || { echo "❌  Could not determine bucket — run 'make infra-up' first"; exit 1; }; \
+	docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e BUCKET_NAME=$$BUCKET \
+		-e CF_DISTRIBUTION_ID=$$CFID \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		digester python scripts/rerender_pages.py
+
+.PHONY: local-clone-prod
+local-clone-prod: ## Clone prod DynamoDB + S3 digest pages → LocalStack (safe read-only on prod)
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
+	test -n "$$BUCKET" || { echo "❌  Could not determine bucket — run 'make infra-up' first"; exit 1; }; \
+	docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e BUCKET_NAME=$$BUCKET \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		crawler python scripts/clone_prod.py
+
+.PHONY: local-digest
+local-digest: ## Run digest against LocalStack without dry-run (marks articles served, writes HTML to LocalStack S3)
+	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=reeds-articles \
+		-e BUCKET_NAME=reeds-local \
+		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_ENDPOINT_URL=http://localstack:4566 \
+		digester \
+		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
+
+.PHONY: local-rerender
+local-rerender: ## Test rerender-pages against LocalStack — safe, no prod writes (run local-crawl + local-digest first)
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=reeds-articles \
+		-e BUCKET_NAME=reeds-local \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_ENDPOINT_URL=http://localstack:4566 \
+		digester python scripts/rerender_pages.py
+
 .PHONY: reset-all
 reset-all: ## ⚠️  Delete ALL articles from DDB and re-crawl (use after schema changes)
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
@@ -189,20 +244,30 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		python -c "import json, sys; from handler import handler; r = handler({}, None); print(json.dumps(r, indent=2))"
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
 
+.PHONY: serve
+serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
+	@echo "Syncing LocalStack S3 → /tmp/reeds-serve/ …"
+	@docker compose run --rm -v /tmp:/tmp \
+		-e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_DEFAULT_REGION=eu-west-1 -e AWS_ENDPOINT_URL=http://localstack:4566 \
+		awscli s3 sync s3://reeds-local/ /tmp/reeds-serve/ --quiet
+	@echo "✅  Open: http://localhost:8080/digest/latest/"
+	@docker run --rm -p 8080:8080 -v /tmp/reeds-serve:/srv -w /srv python:3.12-slim python -m http.server 8080
+
 .PHONY: dev-scroll-test
 dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
 	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
-	@python3 backend/digest/scripts/setup_scroll_test.py
-	@cd /tmp/scroll-test && python3 -m http.server 8080
+	@docker run --rm -v .:/app -w /app python:3.12-slim python backend/digest/scripts/setup_scroll_test.py
+	@docker run --rm -p 8080:8080 -v /tmp/scroll-test:/srv -w /srv python:3.12-slim python -m http.server 8080
 
 # ── LocalStack — offline dev without real AWS ─────────────────────────────────
 .PHONY: local-up
 local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 	docker compose up -d localstack
 	@echo "⏳  Waiting for LocalStack…"
-	@until docker compose exec localstack curl -sf http://localhost:4566/_localstack/health | grep -q '"dynamodb": "available"'; do sleep 1; done
+	@until docker compose exec localstack curl -sf http://localhost:4566/_localstack/health | grep -q '"dynamodb"'; do sleep 1; done
 	@echo "✅  LocalStack ready"
-	@docker compose run --rm \
+	@docker compose run --rm -T \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
@@ -211,14 +276,14 @@ local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 		--table-name reeds-articles \
 		--attribute-definitions AttributeName=url,AttributeType=S \
 		--key-schema AttributeName=url,KeyType=HASH \
-		--billing-mode PAY_PER_REQUEST 2>/dev/null \
+		--billing-mode PAY_PER_REQUEST >/dev/null 2>&1 \
 		&& echo "✅  DynamoDB table created" || echo "ℹ️   DynamoDB table already exists"
-	@docker compose run --rm \
+	@docker compose run --rm -T \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		awscli s3 mb s3://reeds-local 2>/dev/null \
+		awscli s3 mb s3://reeds-local >/dev/null 2>&1 \
 		&& echo "✅  S3 bucket created" || echo "ℹ️   S3 bucket already exists"
 
 .PHONY: local-reset
