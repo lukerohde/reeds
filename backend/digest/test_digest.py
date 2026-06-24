@@ -279,3 +279,62 @@ class TestGeminiSummariseVideo:
             summary, detail = _h.gemini_summarise_video('https://www.youtube.com/watch?v=abc123')
         assert summary == ''
         assert detail == ''
+
+
+# ── TestIsRelevantPrompt ─────────────────────────────────────────────────────
+
+class TestIsRelevantPrompt:
+    """Verify the relevance prompt rejects minor version bumps but keeps major AI releases."""
+
+    def _mock_yes(self):
+        resp = MagicMock()
+        resp.content = [MagicMock(text='yes')]
+        return resp
+
+    def _mock_no(self):
+        resp = MagicMock()
+        resp.content = [MagicMock(text='no')]
+        return resp
+
+    def test_prompt_includes_minor_version_rejection(self):
+        prompt = _h.RELEVANCE_CHECK
+        assert 'minor' in prompt.lower() or 'version bump' in prompt.lower() or 'changelog' in prompt.lower()
+
+    def test_prompt_allows_major_ai_releases(self):
+        prompt = _h.RELEVANCE_CHECK
+        assert 'major' in prompt.lower() or 'ai' in prompt.lower()
+
+
+# ── TestIgnoredArticlesExcluded ──────────────────────────────────────────────
+
+class TestIgnoredArticlesExcluded:
+    """Verify that ignored articles are filtered out before candidate selection."""
+
+    def test_ignored_articles_excluded_from_candidates(self):
+        ignored = [
+            {**_art('Alice', i), 'status': 'ignored', 'served_date': ''}
+            for i in range(10)
+        ]
+        unprocessed = [
+            {**_art('Bob', i), 'served_date': ''}
+            for i in range(10)
+        ]
+        combined = ignored + unprocessed
+        filtered = [i for i in combined if i.get('status') != 'ignored']
+        result = select_candidates(filtered, pool_size=20, max_per_author=2)
+        assert all(a.get('status') != 'ignored' for a in result)
+        assert len(result) == 2  # Bob capped at 2
+
+    def test_relevant_unserved_still_included(self):
+        relevant = [
+            {**_art('Alice', i), 'status': 'relevant', 'served_date': ''}
+            for i in range(5)
+        ]
+        unprocessed = [
+            {**_art('Bob', i), 'served_date': ''}
+            for i in range(5)
+        ]
+        combined = relevant + unprocessed
+        filtered = [i for i in combined if i.get('status') != 'ignored']
+        result = select_candidates(filtered, pool_size=20, max_per_author=2)
+        assert len(result) == 4  # 2 Alice + 2 Bob

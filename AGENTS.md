@@ -101,6 +101,7 @@ make test-digest                   # run digest unit tests only (no LocalStack)
 make test-youtube-fetch            # print recent videos per channel (needs YOUTUBE_API_KEY)
 make show-candidates               # show relevant unserved articles + summaries
 make add-youtuber HANDLE=@handle   # resolve YouTube handle → channel ID → add to config
+make diagnose-pipeline             # pipeline health report: throughput, relevance, backlog
 make diagnose-author AUTHOR="..."  # query DDB stats for an author
 make test-feed FEED=<url>          # discover and verify a feed URL
 make dev-scroll-test               # serve two fake digest pages for infinite scroll testing

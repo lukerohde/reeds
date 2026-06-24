@@ -316,13 +316,14 @@ def handler(event, context):
     today    = datetime.now(MELBOURNE)
     date_str = today.strftime('%Y-%m-%d')
 
-    # All unserved articles (any status)
+    # All unserved articles, excluding already-ignored ones (they'd waste pool slots)
     unserved = table.scan(FilterExpression=Attr('served_date').eq(''))['Items']
     unserved.sort(key=lambda x: x.get('published_date', ''), reverse=True)
-    print(f"[digest] {len(unserved)} unserved articles")
+    eligible = [i for i in unserved if i.get('status') != 'ignored']
+    print(f"[digest] {len(unserved)} unserved articles ({len(unserved) - len(eligible)} ignored, {len(eligible)} eligible)")
 
     # Transform: process unprocessed articles in the candidate pool
-    candidates_raw = select_candidates(unserved)
+    candidates_raw = select_candidates(eligible)
     transform(candidates_raw)
 
     # Curate from relevant candidates

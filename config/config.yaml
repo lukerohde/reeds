@@ -62,7 +62,7 @@ blogs:
 
 settings:
   content_limit: 8000           # chars stored in DynamoDB per article
-  candidates_pool: 20           # unserved articles to consider per digest run
+  candidates_pool: 30           # unserved articles to consider per digest run
   max_per_author: 2             # max articles per author in the candidates pool (0 = no cap)
   digest_size: 10               # articles curated into the final digest
   words_per_minute: 200         # used to calculate read-time label
@@ -75,7 +75,10 @@ prompts:
     Answer only 'yes' or 'no'.
     Is this article primarily about AI, machine learning, software engineering,
     devops, observability, programming, or technology leadership?
-    Reply 'no' for personal life, travel, cultural events, or unrelated topics.
+    Reply 'no' for: personal life, travel, cultural events, unrelated topics,
+    minor version bumps, patch releases, changelogs, and release notes for
+    non-AI libraries or tools (e.g. "SQLite 3.46.1", "Rails 7.1.4").
+    Major AI/LLM model launches (e.g. GPT-5, Claude 4) are relevant — reply 'yes'.
 
     Title: {title}
     Preview: {preview}

@@ -33,6 +33,14 @@ show-candidates: ## Show all relevant unserved articles and their summaries (loc
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
 		crawler python scripts/show_candidates.py
 
+.PHONY: diagnose-pipeline
+diagnose-pipeline: ## Pipeline health report: throughput, relevance rates, backlog, served/day
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		crawler python scripts/diagnose_pipeline.py
+
 .PHONY: diagnose-author
 diagnose-author: ## Show DDB stats for an author. Usage: make diagnose-author AUTHOR="Simon Willison"
 	@test -n "$(AUTHOR)"         || { echo '❌  Usage: make diagnose-author AUTHOR="Author Name"'; exit 1; }
