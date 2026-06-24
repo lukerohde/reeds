@@ -244,6 +244,15 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		python -c "import json, sys; from handler import handler; r = handler({}, None); print(json.dumps(r, indent=2))"
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
 
+.PHONY: serve
+serve: ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@echo "Syncing LocalStack S3 → /tmp/reeds-serve/ …"
+	@aws --endpoint-url http://localhost:4566 s3 sync s3://reeds-local/ /tmp/reeds-serve/ --quiet
+	@echo "✅  Open: http://localhost:8080/digest/latest/"
+	@cd /tmp/reeds-serve && python3 -m http.server 8080
+
 .PHONY: dev-scroll-test
 dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
 	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
