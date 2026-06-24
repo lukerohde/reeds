@@ -249,7 +249,10 @@ serve: ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-p
 	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
 	@echo "Syncing LocalStack S3 → /tmp/reeds-serve/ …"
-	@aws --endpoint-url http://localhost:4566 s3 sync s3://reeds-local/ /tmp/reeds-serve/ --quiet
+	@docker compose run --rm -v /tmp:/tmp \
+		-e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_DEFAULT_REGION=eu-west-1 -e AWS_ENDPOINT_URL=http://localstack:4566 \
+		awscli s3 sync s3://reeds-local/ /tmp/reeds-serve/ --quiet
 	@echo "✅  Open: http://localhost:8080/digest/latest/"
 	@cd /tmp/reeds-serve && python3 -m http.server 8080
 
