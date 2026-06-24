@@ -255,7 +255,7 @@ dev-scroll-test: ## Test infinite scroll locally — serves two fake digest page
 local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 	docker compose up -d localstack
 	@echo "⏳  Waiting for LocalStack…"
-	@until docker compose exec localstack curl -sf http://localhost:4566/_localstack/health | grep -q '"dynamodb": "available"'; do sleep 1; done
+	@until docker compose exec localstack curl -sf http://localhost:4566/_localstack/health | grep -q '"dynamodb"'; do sleep 1; done
 	@echo "✅  LocalStack ready"
 	@docker compose run --rm \
 		-e AWS_ACCESS_KEY_ID=test \
