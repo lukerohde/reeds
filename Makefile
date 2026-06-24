@@ -254,13 +254,13 @@ serve: ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-p
 		-e AWS_DEFAULT_REGION=eu-west-1 -e AWS_ENDPOINT_URL=http://localstack:4566 \
 		awscli s3 sync s3://reeds-local/ /tmp/reeds-serve/ --quiet
 	@echo "✅  Open: http://localhost:8080/digest/latest/"
-	@cd /tmp/reeds-serve && python3 -m http.server 8080
+	@docker run --rm -p 8080:8080 -v /tmp/reeds-serve:/srv -w /srv python:3.12-slim python -m http.server 8080
 
 .PHONY: dev-scroll-test
 dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
 	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
-	@python3 backend/digest/scripts/setup_scroll_test.py
-	@cd /tmp/scroll-test && python3 -m http.server 8080
+	@docker run --rm -v .:/app -w /app python:3.12-slim python backend/digest/scripts/setup_scroll_test.py
+	@docker run --rm -p 8080:8080 -v /tmp/scroll-test:/srv -w /srv python:3.12-slim python -m http.server 8080
 
 # ── LocalStack — offline dev without real AWS ─────────────────────────────────
 .PHONY: local-up
