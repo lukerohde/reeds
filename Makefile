@@ -245,9 +245,7 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
 
 .PHONY: serve
-serve: ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
-	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
-		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
 	@echo "Syncing LocalStack S3 → /tmp/reeds-serve/ …"
 	@docker compose run --rm -v /tmp:/tmp \
 		-e AWS_ACCESS_KEY_ID=test -e AWS_SECRET_ACCESS_KEY=test \
@@ -269,7 +267,7 @@ local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 	@echo "⏳  Waiting for LocalStack…"
 	@until docker compose exec localstack curl -sf http://localhost:4566/_localstack/health | grep -q '"dynamodb"'; do sleep 1; done
 	@echo "✅  LocalStack ready"
-	@docker compose run --rm \
+	@docker compose run --rm -T \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
@@ -280,7 +278,7 @@ local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 		--key-schema AttributeName=url,KeyType=HASH \
 		--billing-mode PAY_PER_REQUEST 2>/dev/null \
 		&& echo "✅  DynamoDB table created" || echo "ℹ️   DynamoDB table already exists"
-	@docker compose run --rm \
+	@docker compose run --rm -T \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
