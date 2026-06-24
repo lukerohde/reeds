@@ -148,6 +148,19 @@ rerender-pages: ## Re-render all historical digest pages with the current templa
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		digester python scripts/rerender_pages.py
 
+.PHONY: local-clone-prod
+local-clone-prod: ## Clone prod DynamoDB + S3 digest pages → LocalStack (safe read-only on prod)
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
+	test -n "$$BUCKET" || { echo "❌  Could not determine bucket — run 'make infra-up' first"; exit 1; }; \
+	docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e BUCKET_NAME=$$BUCKET \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		crawler python scripts/clone_prod.py
+
 .PHONY: local-digest
 local-digest: ## Run digest against LocalStack without dry-run (marks articles served, writes HTML to LocalStack S3)
 	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
