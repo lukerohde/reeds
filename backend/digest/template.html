@@ -71,6 +71,15 @@
   h2 { font-size: 1.05rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.3rem; }
   h2 a { color: var(--text); text-decoration: none; }
   h2 a:hover { color: var(--link); text-decoration: underline; }
+  .date-divider {
+    padding: 2rem 0 0.25rem;
+    border-top: 2px solid var(--border-light);
+    margin-top: 0.5rem;
+  }
+  .date-divider h2 {
+    font-size: 1rem; font-weight: 500; color: var(--muted); letter-spacing: -0.01em;
+  }
+  .load-more { height: 1px; }
   .meta {
     color: var(--muted); font-size: 0.82rem; margin-bottom: 0.6rem;
   }
@@ -126,6 +135,7 @@
       <h1>%HEADING%</h1>
     </div>
     %ITEMS%
+    <div class="load-more" data-prev="%PREV_URL%"></div>
   </div>
 </main>
 <footer>
@@ -138,5 +148,48 @@
     <span>daily digest of AI, devops &amp; software</span>
   </div>
 </footer>
+<script>
+(function () {
+  var sentinel = document.querySelector('.load-more');
+  if (!sentinel || !sentinel.dataset.prev) return;
+  var feed = sentinel.parentElement;
+
+  async function loadNext() {
+    var url = sentinel.dataset.prev;
+    if (!url) return;
+    sentinel.dataset.prev = '';
+    sentinel.style.height = '2rem';
+
+    try {
+      var resp = await fetch(url);
+      var text = await resp.text();
+      var doc = new DOMParser().parseFromString(text, 'text/html');
+
+      var heading = (doc.querySelector('.page-header h1') || {}).textContent || '';
+      var articles = Array.from(doc.querySelectorAll('article'));
+      var next = (doc.querySelector('.load-more') || {}).dataset;
+      var nextPrev = (next && next.prev) || '';
+
+      var divider = document.createElement('div');
+      divider.className = 'date-divider';
+      divider.innerHTML = '<h2>' + heading + '</h2>';
+      feed.insertBefore(divider, sentinel);
+      articles.forEach(function (a) { feed.insertBefore(a, sentinel); });
+
+      sentinel.style.height = '1px';
+      sentinel.dataset.prev = nextPrev;
+      if (!nextPrev) observer.disconnect();
+    } catch (e) {
+      sentinel.style.height = '1px';
+    }
+  }
+
+  var observer = new IntersectionObserver(
+    function (entries) { if (entries[0].isIntersecting) loadNext(); },
+    { rootMargin: '400px' }
+  );
+  observer.observe(sentinel);
+}());
+</script>
 </body>
 </html>
