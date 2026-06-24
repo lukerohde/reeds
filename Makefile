@@ -135,6 +135,19 @@ digest: ## Run digest Lambda locally (DynamoDB → summary HTML → S3)
 		digester \
 		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
 
+.PHONY: backfill-scroll
+backfill-scroll: ## Re-render all historical digest pages with the current template (adds infinite scroll to old pages)
+	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
+	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
+	CFID=$${CF_DISTRIBUTION_ID:-$$(docker compose run --rm -T pulumi stack output reeds_distribution_id 2>/dev/null | tail -1)}; \
+	test -n "$$BUCKET" || { echo "❌  Could not determine bucket — run 'make infra-up' first"; exit 1; }; \
+	docker compose run --rm \
+		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
+		-e BUCKET_NAME=$$BUCKET \
+		-e CF_DISTRIBUTION_ID=$$CFID \
+		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
+		digester python scripts/backfill_pages.py
+
 .PHONY: reset-all
 reset-all: ## ⚠️  Delete ALL articles from DDB and re-crawl (use after schema changes)
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
