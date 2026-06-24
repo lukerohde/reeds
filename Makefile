@@ -135,8 +135,8 @@ digest: ## Run digest Lambda locally (DynamoDB → summary HTML → S3)
 		digester \
 		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
 
-.PHONY: backfill-scroll
-backfill-scroll: ## Re-render all historical digest pages with the current template (adds infinite scroll to old pages)
+.PHONY: rerender-pages
+rerender-pages: ## Re-render all historical digest pages with the current template (picks up infinite scroll, read-more, etc.)
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
 	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
 	CFID=$${CF_DISTRIBUTION_ID:-$$(docker compose run --rm -T pulumi stack output reeds_distribution_id 2>/dev/null | tail -1)}; \
@@ -146,7 +146,36 @@ backfill-scroll: ## Re-render all historical digest pages with the current templ
 		-e BUCKET_NAME=$$BUCKET \
 		-e CF_DISTRIBUTION_ID=$$CFID \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
-		digester python scripts/backfill_pages.py
+		digester python scripts/rerender_pages.py
+
+.PHONY: local-digest
+local-digest: ## Run digest against LocalStack without dry-run (marks articles served, writes HTML to LocalStack S3)
+	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=reeds-articles \
+		-e BUCKET_NAME=reeds-local \
+		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_ENDPOINT_URL=http://localstack:4566 \
+		digester \
+		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
+
+.PHONY: local-rerender
+local-rerender: ## Test rerender-pages against LocalStack — safe, no prod writes (run local-crawl + local-digest first)
+	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
+		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
+	@docker compose run --rm \
+		-e DYNAMODB_TABLE=reeds-articles \
+		-e BUCKET_NAME=reeds-local \
+		-e AWS_DEFAULT_REGION=eu-west-1 \
+		-e AWS_ACCESS_KEY_ID=test \
+		-e AWS_SECRET_ACCESS_KEY=test \
+		-e AWS_ENDPOINT_URL=http://localstack:4566 \
+		digester python scripts/rerender_pages.py
 
 .PHONY: reset-all
 reset-all: ## ⚠️  Delete ALL articles from DDB and re-crawl (use after schema changes)

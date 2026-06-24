@@ -10,7 +10,8 @@ Also re-uploads digest/latest/ pointing to the most recent date.
 One CloudFront invalidation for /digest/* covers everything.
 
 Usage:
-    make backfill-scroll
+    make rerender-pages          # production
+    make local-rerender          # LocalStack (safe test — no prod writes)
 """
 import os
 import time
