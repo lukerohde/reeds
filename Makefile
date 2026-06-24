@@ -276,14 +276,14 @@ local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
 		--table-name reeds-articles \
 		--attribute-definitions AttributeName=url,AttributeType=S \
 		--key-schema AttributeName=url,KeyType=HASH \
-		--billing-mode PAY_PER_REQUEST 2>/dev/null \
+		--billing-mode PAY_PER_REQUEST >/dev/null 2>&1 \
 		&& echo "✅  DynamoDB table created" || echo "ℹ️   DynamoDB table already exists"
 	@docker compose run --rm -T \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ENDPOINT_URL=http://localstack:4566 \
-		awscli s3 mb s3://reeds-local 2>/dev/null \
+		awscli s3 mb s3://reeds-local >/dev/null 2>&1 \
 		&& echo "✅  S3 bucket created" || echo "ℹ️   S3 bucket already exists"
 
 .PHONY: local-reset
