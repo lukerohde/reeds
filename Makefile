@@ -189,6 +189,12 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		python -c "import json, sys; from handler import handler; r = handler({}, None); print(json.dumps(r, indent=2))"
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
 
+.PHONY: dev-scroll-test
+dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
+	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
+	@python3 backend/digest/scripts/setup_scroll_test.py
+	@cd /tmp/scroll-test && python3 -m http.server 8080
+
 # ── LocalStack — offline dev without real AWS ─────────────────────────────────
 .PHONY: local-up
 local-up: ## Start LocalStack and initialise DynamoDB table + S3 bucket
