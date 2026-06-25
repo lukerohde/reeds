@@ -391,7 +391,7 @@ class TestYouTubeItems:
         })
 
         import handler as h
-        with patch.object(h, 'is_relevant', return_value=True) as mock_rel, \
+        with patch.object(h, 'score_relevance', return_value=4) as mock_rel, \
              patch.object(h, 'make_summary', return_value='Claude summary.') as mock_summary:
             from handler import handler
             result = handler({}, None)
@@ -424,7 +424,7 @@ class TestYouTubeItems:
         })
 
         import handler as h
-        with patch.object(h, 'is_relevant', return_value=False) as mock_rel, \
+        with patch.object(h, 'score_relevance', return_value=1) as mock_rel, \
              patch.object(h, 'make_summary') as mock_summary:
             from handler import handler
             handler({}, None)
@@ -455,7 +455,7 @@ class TestYouTubeItems:
         })
 
         import handler as h
-        with patch.object(h, 'is_relevant', return_value=True) as mock_rel, \
+        with patch.object(h, 'score_relevance', return_value=4) as mock_rel, \
              patch.object(h, 'make_summary') as mock_summary:
             from handler import handler
             result = handler({}, None)
@@ -485,7 +485,7 @@ class TestYouTubeItems:
             'word_count':     0,
         })
         import handler as h
-        with patch.object(h, 'is_relevant', return_value=True):
+        with patch.object(h, 'score_relevance', return_value=4):
             from handler import handler
             handler({}, None)
         html = open(PREVIEW).read()

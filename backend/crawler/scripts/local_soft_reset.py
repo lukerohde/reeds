@@ -15,7 +15,7 @@ items = table.scan()['Items']
 for item in items:
     table.update_item(
         Key={'url': item['url']},
-        UpdateExpression='REMOVE #s, summary SET served_date = :e',
+        UpdateExpression='REMOVE #s, summary, relevance_score SET served_date = :e',
         ExpressionAttributeNames={'#s': 'status'},
         ExpressionAttributeValues={':e': ''},
     )

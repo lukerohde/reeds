@@ -12,7 +12,8 @@ from boto3.dynamodb.conditions import Attr
 
 _cfg = yaml.safe_load((Path(__file__).parent / 'config.yaml').read_text())
 
-CANDIDATES_POOL          = _cfg['settings']['candidates_pool']
+DISCOVERY_POOL           = _cfg['settings'].get('discovery_pool', _cfg['settings'].get('candidates_pool', 30))
+CURATION_POOL            = _cfg['settings'].get('curation_pool', 30)
 MAX_PER_AUTHOR           = _cfg['settings'].get('max_per_author', 0)
 DIGEST_SIZE              = _cfg['settings']['digest_size']
 WORDS_PER_MINUTE         = _cfg['settings']['words_per_minute']
@@ -51,11 +52,10 @@ TEMPLATE = (Path(__file__).parent / 'template.html').read_text()
 def select_candidates(unserved, pool_size=None, max_per_author=None):
     """Return up to pool_size articles, capped at max_per_author each.
 
-    Defaults to the module-level config values. Override params are exposed for
-    testing without config dependency.
+    Used for discovery: picks which unprocessed articles to AI-score this run.
     """
-    _pool = CANDIDATES_POOL if pool_size is None else pool_size
-    _cap  = MAX_PER_AUTHOR  if max_per_author is None else max_per_author
+    _pool = DISCOVERY_POOL if pool_size is None else pool_size
+    _cap  = MAX_PER_AUTHOR if max_per_author is None else max_per_author
     if not _cap:
         return unserved[:_pool]
     counts = {}
@@ -70,15 +70,51 @@ def select_candidates(unserved, pool_size=None, max_per_author=None):
     return pool
 
 
+def build_curation_pool(eligible, pool_size=None, max_per_author=None):
+    """Build a priority-sorted pool of relevant articles for curation.
+
+    Pulls from ALL relevant unserved articles (not just today's discovery batch),
+    sorted by relevance_score DESC then published_date DESC. Applies per-author
+    cap and truncates to pool_size.
+    """
+    _pool = CURATION_POOL  if pool_size is None else pool_size
+    _cap  = MAX_PER_AUTHOR if max_per_author is None else max_per_author
+
+    relevant = [i for i in eligible if i.get('status') == 'relevant']
+    relevant.sort(key=lambda x: (int(x.get('relevance_score', 3)),
+                                 x.get('published_date', '')),
+                  reverse=True)
+
+    if not _cap:
+        return relevant[:_pool]
+    counts = {}
+    pool = []
+    for item in relevant:
+        author = item.get('author', '')
+        if counts.get(author, 0) < _cap:
+            pool.append(item)
+            counts[author] = counts.get(author, 0) + 1
+        if len(pool) >= _pool:
+            break
+    return pool
+
+
 # ── Transform ─────────────────────────────────────────────────────────────────
 
-def is_relevant(title, content):
+def score_relevance(title, content):
+    """Return a 1-5 relevance score (0 if unparseable)."""
     msg = ai.messages.create(
         model='claude-haiku-4-5',
         max_tokens=5,
         messages=[{'role': 'user', 'content': RELEVANCE_CHECK.format(title=title, preview=content[:500])}],
     )
-    return msg.content[0].text.strip().lower().startswith('y')
+    text = msg.content[0].text.strip()
+    try:
+        return max(1, min(5, int(text[0])))
+    except (ValueError, IndexError):
+        if text.lower().startswith('y'):
+            return 3
+        return 0
 
 
 def make_summary(title, author, content, word_count=0):
@@ -184,15 +220,17 @@ def transform(items):
             ready_summary, ready_detail = gemini_summarise_video(item['url'])
             content = ready_summary  # use as the relevance signal
 
-        if not is_relevant(item['title'], content):
+        score = score_relevance(item['title'], content)
+        if score <= 1:
             item['status'] = 'ignored'
+            item['relevance_score'] = score
             table.update_item(
                 Key={'url': item['url']},
-                UpdateExpression='SET #s = :s',
+                UpdateExpression='SET #s = :s, relevance_score = :rs',
                 ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={':s': 'ignored'},
+                ExpressionAttributeValues={':s': 'ignored', ':rs': score},
             )
-            print(f"  [ignored]  {item['author']}: {item['title']}")
+            print(f"  [ignored:{score}]  {item['author']}: {item['title']}")
             continue
 
         if item.get('source') == 'youtube' and content and ready_summary is None:
@@ -205,13 +243,14 @@ def transform(items):
         item['status']  = 'relevant'
         item['summary'] = summary
         item['detail']  = detail
+        item['relevance_score'] = score
         table.update_item(
             Key={'url': item['url']},
-            UpdateExpression='SET #s = :s, summary = :m, detail = :d',
+            UpdateExpression='SET #s = :s, summary = :m, detail = :d, relevance_score = :rs',
             ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': 'relevant', ':m': summary, ':d': detail},
+            ExpressionAttributeValues={':s': 'relevant', ':m': summary, ':d': detail, ':rs': score},
         )
-        print(f"  [relevant] {item['author']}: {item['title']}")
+        print(f"  [relevant:{score}] {item['author']}: {item['title']}")
 
 
 def curate(candidates):
@@ -316,19 +355,21 @@ def handler(event, context):
     today    = datetime.now(MELBOURNE)
     date_str = today.strftime('%Y-%m-%d')
 
-    # All unserved articles (any status)
+    # All unserved articles, excluding already-ignored ones
     unserved = table.scan(FilterExpression=Attr('served_date').eq(''))['Items']
     unserved.sort(key=lambda x: x.get('published_date', ''), reverse=True)
-    print(f"[digest] {len(unserved)} unserved articles")
+    eligible = [i for i in unserved if i.get('status') != 'ignored']
+    print(f"[digest] {len(unserved)} unserved articles ({len(unserved) - len(eligible)} ignored, {len(eligible)} eligible)")
 
-    # Transform: process unprocessed articles in the candidate pool
-    candidates_raw = select_candidates(unserved)
-    transform(candidates_raw)
+    # Phase 1: DISCOVERY — AI-score new/unprocessed articles
+    unprocessed = [i for i in eligible if not i.get('status')]
+    discovery_batch = select_candidates(unprocessed)
+    transform(discovery_batch)
 
-    # Curate from relevant candidates
-    relevant = [i for i in candidates_raw if i.get('status') == 'relevant']
-    print(f"[digest] {len(relevant)} relevant in pool → curating to {DIGEST_SIZE}")
-    articles = curate(relevant)
+    # Phase 2: EDITORIAL — curate from ALL relevant unserved (old + newly discovered)
+    curation_pool = build_curation_pool(eligible)
+    print(f"[digest] {len(curation_pool)} in curation pool → curating to {DIGEST_SIZE}")
+    articles = curate(curation_pool)
     print(f"[digest] selected {len(articles)} articles")
     for a in articles:
         print(f"  {a['author']}: {a['title']}")

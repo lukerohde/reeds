@@ -62,8 +62,9 @@ blogs:
 
 settings:
   content_limit: 8000           # chars stored in DynamoDB per article
-  candidates_pool: 20           # unserved articles to consider per digest run
-  max_per_author: 2             # max articles per author in the candidates pool (0 = no cap)
+  discovery_pool: 30            # max unprocessed articles to AI-score per run
+  curation_pool: 30             # max relevant articles fed to the curator
+  max_per_author: 2             # max articles per author in the curation pool (0 = no cap)
   digest_size: 10               # articles curated into the final digest
   words_per_minute: 200         # used to calculate read-time label
   youtube_lookback_days: 7      # how far back to fetch videos per run
@@ -72,10 +73,17 @@ settings:
 
 prompts:
   relevance_check: |
-    Answer only 'yes' or 'no'.
-    Is this article primarily about AI, machine learning, software engineering,
-    devops, observability, programming, or technology leadership?
-    Reply 'no' for personal life, travel, cultural events, or unrelated topics.
+    Rate this article's relevance from 1 to 5 for a senior software engineer
+    interested in AI, ML, software engineering, devops, observability,
+    programming, and technology leadership.
+
+    1 = Not relevant (personal life, travel, minor version bumps, changelogs)
+    2 = Marginally relevant (tangential, general industry news)
+    3 = Relevant (on-topic, standard technical content)
+    4 = Very relevant (practical insight, notable development)
+    5 = Must-read (deep analysis, major AI launch, paradigm shift)
+
+    Reply with only a single digit (1-5). No other text.
 
     Title: {title}
     Preview: {preview}
