@@ -287,11 +287,17 @@ def read_time_label(word_count):
 
 def prev_digest_date(current_date_str):
     try:
-        resp = table.scan(
-            FilterExpression=Attr('served_date').ne('') & Attr('served_date').ne(current_date_str),
-            ProjectionExpression='served_date',
-        )
-        dates = {item['served_date'] for item in resp.get('Items', [])}
+        dates = set()
+        scan_kwargs = {
+            'FilterExpression': Attr('served_date').ne('') & Attr('served_date').ne(current_date_str),
+            'ProjectionExpression': 'served_date',
+        }
+        while True:
+            resp = table.scan(**scan_kwargs)
+            dates.update(item['served_date'] for item in resp.get('Items', []))
+            if 'LastEvaluatedKey' not in resp:
+                break
+            scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
         return max(dates) if dates else None
     except Exception:
         return None
@@ -356,7 +362,14 @@ def handler(event, context):
     date_str = today.strftime('%Y-%m-%d')
 
     # All unserved articles, excluding already-ignored ones
-    unserved = table.scan(FilterExpression=Attr('served_date').eq(''))['Items']
+    unserved = []
+    scan_kwargs = {'FilterExpression': Attr('served_date').eq('')}
+    while True:
+        resp = table.scan(**scan_kwargs)
+        unserved.extend(resp.get('Items', []))
+        if 'LastEvaluatedKey' not in resp:
+            break
+        scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
     unserved.sort(key=lambda x: x.get('published_date', ''), reverse=True)
     eligible = [i for i in unserved if i.get('status') != 'ignored']
     print(f"[digest] {len(unserved)} unserved articles ({len(unserved) - len(eligible)} ignored, {len(eligible)} eligible)")
