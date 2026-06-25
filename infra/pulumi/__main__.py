@@ -175,7 +175,7 @@ digest = aws.lambda_.Function(
     handler="handler.handler",
     role=lambda_role.arn,
     code=digest_zip,
-    timeout=300,
+    timeout=900,
     environment=aws.lambda_.FunctionEnvironmentArgs(variables={
         "DYNAMODB_TABLE":      table.name,
         "BUCKET_NAME":         site.bucket_name,
