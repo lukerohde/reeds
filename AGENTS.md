@@ -26,11 +26,18 @@ all AI cost sits in the digest Lambda.
 Everything tuneable lives in `config/config.yaml`:
 - **blogs** — list of `{author, url, feed}` entries
 - **youtubers** — list of `{name, channel_id}` entries
-- **settings** — `content_limit`, `candidates_pool`, `max_per_author`, `digest_size`,
+- **settings** — `content_limit`, `discovery_pool`, `curation_pool`, `max_per_author`, `digest_size`,
   `words_per_minute`, `summarise_long_threshold`, `youtube_lookback_days`, `max_videos_per_channel`
 - **prompts** — `relevance_check`, `summarise_short`, `summarise_long`, `youtube_summarise`, `curate`
 
-`max_per_author` caps how many articles a single author can contribute to the candidates pool.
+`discovery_pool` controls how many unprocessed articles are AI-scored per digest run.
+`curation_pool` controls how many relevant articles are fed to the curator prompt.
+The digest runs in two phases: **discovery** (score new articles 1-5, summarise relevant ones)
+then **editorial** (curate from ALL relevant unserved, sorted by score DESC then date DESC).
+Articles that aren't curated stay in the pool for future runs — high-scored old content
+backfills the digest on thin news days.
+
+`max_per_author` caps how many articles a single author can contribute to the curation pool.
 Without it, prolific authors (e.g. Simon Willison posts many times daily) dominate the pool and
 crowd out other voices even before the curate step runs.
 
@@ -148,7 +155,7 @@ to iterate on prompts without re-fetching content.
 
 Each article item: `url` (PK), `author`, `title`, `published_date`, `fetched_date`,
 `served_date`, `word_count`, `content` (≤8000 chars), `status` (relevant/ignored),
-`summary`, `detail`.
+`relevance_score` (1-5, absent on legacy items → defaults to 3), `summary`, `detail`.
 
 `detail` is non-empty only for YouTube videos where the AI judged the content
 information-dense enough to warrant a full write-up. Rendered as a ▸ read more

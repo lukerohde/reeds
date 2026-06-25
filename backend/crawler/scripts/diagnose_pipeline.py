@@ -65,6 +65,17 @@ print(f'\n── Status breakdown (all articles) ──')
 for status in ['relevant', 'ignored', 'unprocessed']:
     print(f'  {status:14s}: {status_counts.get(status, 0)}')
 
+# ── Relevance score distribution ──────────────────────────────────────────────
+scored = [i for i in items if i.get('relevance_score') is not None]
+if scored:
+    score_dist = Counter(int(i['relevance_score']) for i in scored)
+    print(f'\n── Relevance score distribution ({len(scored)} scored) ──')
+    for s in range(1, 6):
+        bar = '#' * score_dist.get(s, 0)
+        print(f'  {s}: {score_dist.get(s, 0):3d}  {bar}')
+else:
+    print(f'\n── Relevance scores: none yet (legacy articles have no score) ──')
+
 # ── Unserved backlog ──────────────────────────────────────────────────────────
 unserved = [i for i in items if i.get('served_date', '') == '']
 unserved_relevant = [i for i in unserved if i.get('status') == 'relevant']

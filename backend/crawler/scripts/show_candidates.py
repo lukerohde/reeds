@@ -34,7 +34,8 @@ youtube = [i for i in items if i.get('source') == 'youtube']
 def show(item):
     wc  = item.get('word_count', 0)
     src = '[yt]' if item.get('source') == 'youtube' else '    '
-    print(f"{src} {item['author']}: {item['title']}")
+    score = item.get('relevance_score', '?')
+    print(f"{src} [{score}] {item['author']}: {item['title']}")
     print(f"     {item['url']}")
     print(f"     {item.get('published_date', '')[:10]}  {wc} words")
     summary = item.get('summary', '').strip()

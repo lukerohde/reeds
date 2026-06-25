@@ -16,7 +16,7 @@ os.environ.setdefault('AWS_ACCESS_KEY_ID', 'test')
 os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
 
 import handler as _h
-from handler import select_candidates, read_time_label, build_html
+from handler import select_candidates, build_curation_pool, read_time_label, build_html
 
 
 def _art(author, i=0):
@@ -281,28 +281,134 @@ class TestGeminiSummariseVideo:
         assert detail == ''
 
 
-# ── TestIsRelevantPrompt ─────────────────────────────────────────────────────
+# ── TestRelevancePrompt ───────────────────────────────────────────────────────
 
-class TestIsRelevantPrompt:
-    """Verify the relevance prompt rejects minor version bumps but keeps major AI releases."""
+class TestRelevancePrompt:
+    """Verify the relevance prompt uses a 1-5 scoring scale."""
 
-    def _mock_yes(self):
+    def test_prompt_uses_numeric_scale(self):
+        prompt = _h.RELEVANCE_CHECK
+        assert '1' in prompt and '5' in prompt
+
+    def test_prompt_rejects_minor_versions_at_low_score(self):
+        prompt = _h.RELEVANCE_CHECK.lower()
+        assert 'minor' in prompt or 'version bump' in prompt or 'changelog' in prompt
+
+    def test_prompt_scores_major_ai_launches_high(self):
+        prompt = _h.RELEVANCE_CHECK.lower()
+        assert 'major' in prompt or 'ai' in prompt
+
+
+# ── TestScoreRelevance ───────────────────────────────────────────────────────
+
+class TestScoreRelevance:
+    """score_relevance parses a 1-5 digit from Haiku's response."""
+
+    def _mock_response(self, text):
         resp = MagicMock()
-        resp.content = [MagicMock(text='yes')]
+        resp.content = [MagicMock(text=text)]
         return resp
 
-    def _mock_no(self):
-        resp = MagicMock()
-        resp.content = [MagicMock(text='no')]
-        return resp
+    def test_parses_digit(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('4')
+            assert _h.score_relevance('Title', 'Content') == 4
 
-    def test_prompt_includes_minor_version_rejection(self):
-        prompt = _h.RELEVANCE_CHECK
-        assert 'minor' in prompt.lower() or 'version bump' in prompt.lower() or 'changelog' in prompt.lower()
+    def test_clamps_high(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('7')
+            assert _h.score_relevance('Title', 'Content') == 5
 
-    def test_prompt_allows_major_ai_releases(self):
-        prompt = _h.RELEVANCE_CHECK
-        assert 'major' in prompt.lower() or 'ai' in prompt.lower()
+    def test_clamps_low(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('0')
+            assert _h.score_relevance('Title', 'Content') == 1
+
+    def test_falls_back_on_yes(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('yes')
+            assert _h.score_relevance('Title', 'Content') == 3
+
+    def test_returns_zero_on_no(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('no')
+            assert _h.score_relevance('Title', 'Content') == 0
+
+    def test_returns_zero_on_garbage(self):
+        with patch.object(_h, 'ai') as mock_ai:
+            mock_ai.messages.create.return_value = self._mock_response('maybe')
+            assert _h.score_relevance('Title', 'Content') == 0
+
+
+# ── TestBuildCurationPool ────────────────────────────────────────────────────
+
+class TestBuildCurationPool:
+    """build_curation_pool sorts by score DESC then date DESC, with author cap."""
+
+    def test_sorts_by_score_desc(self):
+        articles = [
+            {**_art('Alice', 0), 'status': 'relevant', 'relevance_score': 3},
+            {**_art('Bob', 0), 'status': 'relevant', 'relevance_score': 5},
+            {**_art('Carol', 0), 'status': 'relevant', 'relevance_score': 4},
+        ]
+        result = build_curation_pool(articles, pool_size=10, max_per_author=0)
+        assert result[0]['author'] == 'Bob'
+        assert result[1]['author'] == 'Carol'
+        assert result[2]['author'] == 'Alice'
+
+    def test_same_score_sorted_by_date_desc(self):
+        old = {**_art('Alice', 0), 'status': 'relevant', 'relevance_score': 4,
+               'published_date': '2024-01-01T00:00:00Z'}
+        new = {**_art('Bob', 0), 'status': 'relevant', 'relevance_score': 4,
+               'published_date': '2024-06-15T00:00:00Z'}
+        result = build_curation_pool([old, new], pool_size=10, max_per_author=0)
+        # Same score → newer first (date DESC means higher string sorts first)
+        assert result[0]['author'] == 'Bob'
+        assert result[1]['author'] == 'Alice'
+
+    def test_applies_author_cap(self):
+        articles = [
+            {**_art('Alice', i), 'status': 'relevant', 'relevance_score': 5}
+            for i in range(10)
+        ]
+        result = build_curation_pool(articles, pool_size=20, max_per_author=2)
+        assert len(result) == 2
+
+    def test_respects_pool_size(self):
+        articles = [
+            {**_art(f'Author{i}', 0), 'status': 'relevant', 'relevance_score': 4}
+            for i in range(50)
+        ]
+        result = build_curation_pool(articles, pool_size=30, max_per_author=0)
+        assert len(result) == 30
+
+    def test_only_includes_relevant(self):
+        articles = [
+            {**_art('Alice', 0), 'status': 'relevant', 'relevance_score': 4},
+            {**_art('Bob', 0), 'status': 'ignored', 'relevance_score': 1},
+            {**_art('Carol', 0)},  # unprocessed, no status
+        ]
+        result = build_curation_pool(articles, pool_size=10, max_per_author=0)
+        assert len(result) == 1
+        assert result[0]['author'] == 'Alice'
+
+    def test_legacy_articles_default_to_score_3(self):
+        legacy = {**_art('Alice', 0), 'status': 'relevant'}  # no relevance_score
+        scored = {**_art('Bob', 0), 'status': 'relevant', 'relevance_score': 4}
+        result = build_curation_pool([legacy, scored], pool_size=10, max_per_author=0)
+        assert result[0]['author'] == 'Bob'  # score 4 beats default 3
+        assert result[1]['author'] == 'Alice'
+
+    def test_high_score_old_beats_low_score_new(self):
+        old_gem = {**_art('Alice', 0), 'status': 'relevant', 'relevance_score': 5,
+                   'published_date': '2020-01-01T00:00:00Z'}
+        new_junk = {**_art('Bob', 0), 'status': 'relevant', 'relevance_score': 2,
+                    'published_date': '2026-06-25T00:00:00Z'}
+        result = build_curation_pool([old_gem, new_junk], pool_size=10, max_per_author=0)
+        assert result[0]['author'] == 'Alice'
+
+    def test_empty_input(self):
+        assert build_curation_pool([], pool_size=10, max_per_author=2) == []
 
 
 # ── TestIgnoredArticlesExcluded ──────────────────────────────────────────────
