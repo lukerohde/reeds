@@ -1,6 +1,7 @@
 import os
 import re
 import json
+from html import escape as html_escape
 import yaml
 import boto3
 import requests
@@ -304,7 +305,13 @@ def prev_digest_date(current_date_str):
 
 
 def _md_to_html(text):
-    """Convert bold/italic markdown to HTML so summaries render correctly."""
+    """Convert bold/italic markdown to HTML so summaries render correctly.
+
+    Escapes HTML first so literal angle brackets in LLM-generated text (e.g. a
+    summary discussing example tags like <table> or <canvas>) render as text
+    instead of being parsed as real elements and corrupting the page structure.
+    """
+    text = html_escape(text, quote=False)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'<em>\1</em>', text)
     return text
@@ -323,7 +330,7 @@ def build_html(articles, date_str, prev_date_str):
     items_html = ''
     for a in articles:
         read_time  = read_time_label(a.get('word_count', 0))
-        meta_parts = [a['author'], a.get('published_date', '')[:10]]
+        meta_parts = [html_escape(a['author']), a.get('published_date', '')[:10]]
         if read_time:
             meta_parts.append(read_time)
         meta = ' · '.join(p for p in meta_parts if p)
@@ -337,7 +344,7 @@ def build_html(articles, date_str, prev_date_str):
       </details>"""
         items_html += f"""
     <article>
-      <h2><a href="{a['url']}">{a['title']}</a></h2>
+      <h2><a href="{html_escape(a['url'], quote=True)}">{html_escape(a['title'])}</a></h2>
       <p class="meta">{meta}</p>
       <p class="summary">{_md_to_html(a.get('summary', ''))}</p>{detail_html}
     </article>"""

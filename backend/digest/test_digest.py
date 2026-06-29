@@ -162,6 +162,35 @@ class TestBuildHtml:
         assert '<em>important</em>' in html
         assert '*important*' not in html
 
+    def test_escapes_html_tags_in_summary(self):
+        # Regression: a summary discussing literal HTML tags must NOT inject real
+        # elements. A stray <table> from an LLM summary once flipped the browser
+        # parser into table mode and hid every article after the first.
+        article = {**self._article, 'summary': 'Use tags like <table> and <canvas>.'}
+        html = build_html([article], '2024-01-15', None)
+        assert '&lt;table&gt;' in html
+        assert '&lt;canvas&gt;' in html
+        assert '<table>' not in html  # template has none, so this is the injected tag
+
+    def test_escaping_preserves_markdown(self):
+        # Escaping must happen before markdown conversion, so bold/italic still work.
+        article = {**self._article, 'summary': 'Wrap **<table>** in *<div>*.'}
+        html = build_html([article], '2024-01-15', None)
+        assert '<strong>&lt;table&gt;</strong>' in html
+        assert '<em>&lt;div&gt;</em>' in html
+
+    def test_escapes_html_tags_in_title(self):
+        article = {**self._article, 'title': 'Evil <script>alert(1)</script> title'}
+        html = build_html([article], '2024-01-15', None)
+        assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+        assert 'alert(1)</script>' not in html
+
+    def test_escapes_html_tags_in_detail(self):
+        article = {**self._article, 'detail': 'Example: <table> based layout.'}
+        html = build_html([article], '2024-01-15', None)
+        assert '&lt;table&gt;' in html
+        assert '<table>' not in html
+
 
 # ── TestMakeSummaryWordCount ──────────────────────────────────────────────────
 

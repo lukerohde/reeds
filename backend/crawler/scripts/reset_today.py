@@ -14,7 +14,14 @@ from boto3.dynamodb.conditions import Attr
 table = boto3.resource('dynamodb').Table(os.environ['DYNAMODB_TABLE'])
 today = datetime.now(ZoneInfo('Australia/Melbourne')).strftime('%Y-%m-%d')
 
-items = table.scan(FilterExpression=Attr('served_date').eq(today))['Items']
+items = []
+scan_kwargs = {'FilterExpression': Attr('served_date').eq(today)}
+while True:
+    resp = table.scan(**scan_kwargs)
+    items.extend(resp.get('Items', []))
+    if 'LastEvaluatedKey' not in resp:
+        break
+    scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
 for item in items:
     table.update_item(
         Key={'url': item['url']},
