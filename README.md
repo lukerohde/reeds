@@ -25,12 +25,8 @@ Runs entirely on free-tier-friendly serverless: Lambda + EventBridge + DynamoDB 
 
 ## Sources tracked
 
-**Blogs:** Simon Willison · Andrej Karpathy · Martin Fowler · Charity Majors · Thorsten Ball ·
-Kent Beck · Henrik Kniberg · Steve Yegge · Addy Osmani · Bryan Cantrill
-
-**YouTube:** Fireship · Theo (t3.gg) · Andrej Karpathy · Yannic Kilcher · Two Minute Papers
-
-Configured in [`config/config.yaml`](config/config.yaml) alongside prompts and digest settings.
+Blogs and YouTube channels — alongside prompts and digest settings — live in
+[`config/config.yaml`](config/config.yaml) (the `blogs` and `youtubers` lists).
 
 To add a new blog, open this repo in [Claude Code](https://claude.ai/code) and run `/add-blog` —
 Claude will discover the feed URL, verify it, add it to config, and push.
