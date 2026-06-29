@@ -16,7 +16,8 @@ from pathlib import Path
 import requests
 
 # Repo config (writable), not the read-only copy bind-mounted next to the handler.
-CONFIG = Path(__file__).resolve().parents[2] / 'config' / 'config.yaml'
+# __file__ = backend/crawler/scripts/add_youtuber.py → parents[3] is the repo root.
+CONFIG = Path(__file__).resolve().parents[3] / 'config' / 'config.yaml'
 
 _CHANNEL_ID = re.compile(r'"(?:channelId|externalId)":"(UC[A-Za-z0-9_-]{22})"')
 _OG_TITLE   = re.compile(r'<meta\s+property="og:title"\s+content="([^"]*)"')
