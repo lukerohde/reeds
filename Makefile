@@ -17,7 +17,7 @@ INFRA_REGION := $(shell grep -m1 'aws:region:' infra/pulumi/Pulumi.prod.yaml 2>/
 # ── Help ──────────────────────────────────────────────────────────────────────
 .PHONY: help
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_/-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z_/-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 # ── Lambda — local invocation ─────────────────────────────────────────────────
@@ -108,9 +108,8 @@ test-digest: ## Run digest unit tests only (no LocalStack)
 
 .PHONY: test-youtube-fetch
 test-youtube-fetch: ## Fetch recent videos for each channel and print them (no DDB writes). Needs YOUTUBE_API_KEY.
-	@test -n "$(YOUTUBE_API_KEY)" || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
+	@test -n "$$YOUTUBE_API_KEY" || { echo "❌  YOUTUBE_API_KEY not set in .env"; exit 1; }
 	@docker compose run --rm \
-		-e YOUTUBE_API_KEY=$(YOUTUBE_API_KEY) \
 		-e DYNAMODB_TABLE=test-dummy \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
@@ -122,7 +121,6 @@ crawl: ## Run crawler Lambda locally (RSS feeds + YouTube → DynamoDB; YouTube 
 	@test -n "$(DYNAMODB_TABLE)" || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
-		-e YOUTUBE_API_KEY=$(YOUTUBE_API_KEY) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		crawler \
 		python -c "import json; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
@@ -130,7 +128,7 @@ crawl: ## Run crawler Lambda locally (RSS feeds + YouTube → DynamoDB; YouTube 
 .PHONY: digest
 digest: ## Run digest Lambda locally (DynamoDB → summary HTML → S3)
 	@test -n "$(DYNAMODB_TABLE)"    || { echo "❌  DYNAMODB_TABLE not set in .env"; exit 1; }
-	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
+	@test -n "$$ANTHROPIC_API_KEY" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
 	@BUCKET=$${BUCKET_NAME:-$$(docker compose run --rm -T pulumi stack output reeds_bucket 2>/dev/null | tail -1)}; \
 	CFID=$${CF_DISTRIBUTION_ID:-$$(docker compose run --rm -T pulumi stack output reeds_distribution_id 2>/dev/null | tail -1)}; \
 	test -n "$$BUCKET" || { echo "❌  Could not determine bucket — run 'make infra-up' first"; exit 1; }; \
@@ -138,7 +136,6 @@ digest: ## Run digest Lambda locally (DynamoDB → summary HTML → S3)
 		-e DYNAMODB_TABLE=$(DYNAMODB_TABLE) \
 		-e BUCKET_NAME=$$BUCKET \
 		-e CF_DISTRIBUTION_ID=$$CFID \
-		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		digester \
 		python -c "import json, sys; from handler import handler; print(json.dumps(handler({}, None), indent=2))"
@@ -171,13 +168,12 @@ local-clone-prod: ## Clone prod DynamoDB + S3 digest pages → LocalStack (safe 
 
 .PHONY: local-digest
 local-digest: ## Run digest against LocalStack without dry-run (marks articles served, writes HTML to LocalStack S3)
-	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
+	@test -n "$$ANTHROPIC_API_KEY" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
 	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=reeds-articles \
 		-e BUCKET_NAME=reeds-local \
-		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
@@ -233,16 +229,15 @@ reset-youtube-nosummary: ## Clear status+summary for YouTube items with no trans
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		crawler python scripts/reset_youtube_nosummary.py
 
-.PHONY: dev
-dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens in browser
-	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
+.PHONY: local-preview
+local-preview: ## Preview digest locally (LocalStack DDB, no S3 upload, opens browser; dry-run — not marked served)
+	@test -n "$$ANTHROPIC_API_KEY" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
 	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
 	@docker compose run --rm \
 		-v /tmp:/tmp \
 		-e DYNAMODB_TABLE=reeds-articles \
 		-e BUCKET_NAME=reeds-local \
-		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
@@ -251,6 +246,9 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		digester \
 		python -c "import json, sys; from handler import handler; r = handler({}, None); print(json.dumps(r, indent=2))"
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
+
+.PHONY: dev
+dev: local-preview ## Alias for `make local-preview`
 
 .PHONY: serve
 serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
@@ -264,7 +262,7 @@ serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run loca
 
 .PHONY: dev-scroll-test
 dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
-	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
+	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make local-preview' first to generate the preview"; exit 1; }
 	@docker run --rm -v .:/app -w /app python:3.12-slim python backend/digest/scripts/setup_scroll_test.py
 	@docker run --rm -p 8080:8080 -v /tmp/scroll-test:/srv -w /srv python:3.12-slim python -m http.server 8080
 
@@ -324,7 +322,6 @@ local-crawl: ## Fetch RSS feeds (+ YouTube if YOUTUBE_API_KEY set) → LocalStac
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=reeds-articles \
-		-e YOUTUBE_API_KEY=$(YOUTUBE_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
@@ -352,7 +349,6 @@ test-integration: ## Run digest integration tests against LocalStack (make local
 		-v /tmp:/tmp \
 		-e DYNAMODB_TABLE=reeds-articles \
 		-e BUCKET_NAME=reeds-local \
-		-e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \

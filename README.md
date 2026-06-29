@@ -28,11 +28,10 @@ Runs entirely on free-tier-friendly serverless: Lambda + EventBridge + DynamoDB 
 Blogs and YouTube channels — alongside prompts and digest settings — live in
 [`config/config.yaml`](config/config.yaml) (the `blogs` and `youtubers` lists).
 
-To add a new blog, open this repo in [Claude Code](https://claude.ai/code) and run `/add-blog` —
-Claude will discover the feed URL, verify it, add it to config, and push.
-
-To add a YouTube channel: `make add-youtuber HANDLE=@handle` — it resolves the channel ID
-straight from the page (no API key needed) and appends it to `config/config.yaml`.
+To add a source, open this repo in [Claude Code](https://claude.ai/code) and run `/add-blog` or
+`/add-youtuber` — Claude discovers/resolves the source, verifies it, adds it to config, and pushes.
+(`/add-youtuber` wraps `make add-youtuber HANDLE=@handle`, which also works on its own — no API key
+needed.)
 
 ## Commands
 
@@ -52,23 +51,19 @@ make infra-up       # deploy/update AWS infrastructure via Pulumi
 Uses [LocalStack](https://localstack.cloud) to run DynamoDB and S3 locally in Docker.
 
 ```bash
-make local-up      # start LocalStack, create DynamoDB table + S3 bucket (first time)
-make local-crawl   # fetch RSS feeds + article content → local DynamoDB (no AI)
-make dev           # transform (AI) + curate → preview HTML → open in browser
-make local-reset   # delete all local articles (re-run local-crawl to start fresh)
+make local-up       # start LocalStack, create DynamoDB table + S3 bucket (first time)
+make local-crawl    # fetch RSS feeds + article content → local DynamoDB (no AI)
+make local-preview  # transform (AI) + curate → preview HTML → open in browser
+make local-reset    # delete all local articles (re-run local-crawl to start fresh)
 ```
 
-`make dev` writes to `/tmp/reeds-digest-preview.html` and opens it. Only `ANTHROPIC_API_KEY`
-is needed — LocalStack handles AWS locally with dummy credentials. (YouTube is crawled
-automatically when `YOUTUBE_API_KEY` is set.)
+`make local-preview` writes to `/tmp/reeds-digest-preview.html` and opens it (dry-run — articles
+aren't marked served). Only `ANTHROPIC_API_KEY` is needed — LocalStack handles AWS locally with
+dummy credentials. (YouTube is crawled automatically when `YOUTUBE_API_KEY` is set.) `make dev`
+still works as an alias.
 
-Prompt engineering workflow:
-```bash
-make local-crawl        # once — fetch articles into LocalStack
-make local-soft-reset   # clear AI fields (status/summary) without deleting content
-# edit config/config.yaml (prompts section)
-make dev                # re-run transform + curate + preview
-```
+To iterate on prompts: edit the `prompts` section of `config/config.yaml`, then re-run
+`make local-soft-reset` (clears AI fields, keeps content) and `make local-preview`.
 
 ## Setup
 
