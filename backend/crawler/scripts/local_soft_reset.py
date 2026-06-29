@@ -9,9 +9,10 @@ Usage:
 
 import os
 import boto3
+from ddb_utils import scan_all
 
 table = boto3.resource('dynamodb').Table(os.environ['DYNAMODB_TABLE'])
-items = table.scan()['Items']
+items = scan_all(table)
 for item in items:
     table.update_item(
         Key={'url': item['url']},

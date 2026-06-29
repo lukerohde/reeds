@@ -87,7 +87,7 @@ test: ## Run all unit tests (crawler + digest)
 		-e AWS_ACCESS_KEY_ID=test \
 		-e AWS_SECRET_ACCESS_KEY=test \
 		-e AWS_DEFAULT_REGION=eu-west-1 \
-		crawler python -m pytest test_handler.py test_sources.py -v
+		crawler python -m pytest test_handler.py test_sources.py test_scan_all.py -v
 	@docker compose run --rm \
 		-e DYNAMODB_TABLE=test-table \
 		-e BUCKET_NAME=test-bucket \
