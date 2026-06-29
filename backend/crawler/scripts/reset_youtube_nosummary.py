@@ -12,17 +12,11 @@ Usage:
 import os
 import boto3
 from boto3.dynamodb.conditions import Attr
+from ddb_utils import scan_all
 
 table = boto3.resource('dynamodb').Table(os.environ['DYNAMODB_TABLE'])
 
-items = []
-scan_kwargs = {'FilterExpression': Attr('source').eq('youtube')}
-while True:
-    resp = table.scan(**scan_kwargs)
-    items.extend(resp.get('Items', []))
-    if 'LastEvaluatedKey' not in resp:
-        break
-    scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
+items = scan_all(table, FilterExpression=Attr('source').eq('youtube'))
 
 reset = 0
 for item in items:
