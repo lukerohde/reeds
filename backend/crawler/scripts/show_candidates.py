@@ -13,8 +13,14 @@ endpoint = os.environ.get('AWS_ENDPOINT_URL')
 ddb      = boto3.resource('dynamodb', endpoint_url=endpoint)
 table    = ddb.Table(os.environ['DYNAMODB_TABLE'])
 
-resp_all  = table.scan(FilterExpression=Attr('served_date').eq(''))
-all_items = resp_all['Items']
+all_items = []
+scan_kwargs = {'FilterExpression': Attr('served_date').eq('')}
+while True:
+    resp = table.scan(**scan_kwargs)
+    all_items.extend(resp.get('Items', []))
+    if 'LastEvaluatedKey' not in resp:
+        break
+    scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
 pending   = [i for i in all_items if not i.get('status')]
 items     = sorted(
     [i for i in all_items if i.get('status') == 'relevant'],
