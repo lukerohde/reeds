@@ -28,7 +28,9 @@ Runs entirely on free-tier-friendly serverless: Lambda + EventBridge + DynamoDB 
 **Blogs:** Simon Willison · Andrej Karpathy · Martin Fowler · Charity Majors · Thorsten Ball ·
 Kent Beck · Henrik Kniberg · Steve Yegge · Addy Osmani · Bryan Cantrill
 
-**YouTube:** Fireship · Theo (t3.gg) · Andrej Karpathy · Yannic Kilcher · Two Minute Papers
+**YouTube:** Fireship · Theo (t3.gg) · Andrej Karpathy · Yannic Kilcher · Two Minute Papers ·
+Derick Chen (BuildWithDC) · Wes Roth · Agentic Engineering · Lex Fridman · AI Engineer ·
+Beyond Coding · Nate B Jones · Dwarkesh Patel
 
 Configured in [`config/config.yaml`](config/config.yaml) alongside prompts and digest settings.
 
