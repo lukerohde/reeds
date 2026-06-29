@@ -17,7 +17,7 @@ INFRA_REGION := $(shell grep -m1 'aws:region:' infra/pulumi/Pulumi.prod.yaml 2>/
 # ── Help ──────────────────────────────────────────────────────────────────────
 .PHONY: help
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_/-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z_/-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 # ── Lambda — local invocation ─────────────────────────────────────────────────
@@ -233,8 +233,8 @@ reset-youtube-nosummary: ## Clear status+summary for YouTube items with no trans
 		-e AWS_DEFAULT_REGION=$(INFRA_REGION) \
 		crawler python scripts/reset_youtube_nosummary.py
 
-.PHONY: dev
-dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens in browser
+.PHONY: local-preview
+local-preview: ## Preview digest locally (LocalStack DDB, no S3 upload, opens browser; dry-run — not marked served)
 	@test -n "$(ANTHROPIC_API_KEY)" || { echo "❌  ANTHROPIC_API_KEY not set in .env"; exit 1; }
 	@docker compose ps localstack 2>/dev/null | grep -qE "Up|running" \
 		|| { echo "❌  LocalStack not running — run 'make local-up' first"; exit 1; }
@@ -252,6 +252,9 @@ dev: ## Preview digest HTML locally — uses LocalStack DDB, no S3 upload, opens
 		python -c "import json, sys; from handler import handler; r = handler({}, None); print(json.dumps(r, indent=2))"
 	@open /tmp/reeds-digest-preview.html 2>/dev/null || echo "→ open /tmp/reeds-digest-preview.html in your browser"
 
+.PHONY: dev
+dev: local-preview ## Alias for `make local-preview`
+
 .PHONY: serve
 serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run local-clone-prod or local-rerender first)
 	@echo "Syncing LocalStack S3 → /tmp/reeds-serve/ …"
@@ -264,7 +267,7 @@ serve: local-up ## Serve LocalStack S3 digest pages over HTTP on :8080 (run loca
 
 .PHONY: dev-scroll-test
 dev-scroll-test: ## Test infinite scroll locally — serves two fake digest pages over HTTP on :8080
-	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make dev' first to generate the preview"; exit 1; }
+	@test -f /tmp/reeds-digest-preview.html || { echo "❌  Run 'make local-preview' first to generate the preview"; exit 1; }
 	@docker run --rm -v .:/app -w /app python:3.12-slim python backend/digest/scripts/setup_scroll_test.py
 	@docker run --rm -p 8080:8080 -v /tmp/scroll-test:/srv -w /srv python:3.12-slim python -m http.server 8080
 

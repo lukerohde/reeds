@@ -15,6 +15,7 @@ Defined in [`.claude/commands/`](.claude/commands/) — run `/<name>` in Claude 
 |---|---|
 | `/setup` | Walk through installing your own reeds digest end-to-end |
 | `/add-blog` | Discover, verify, add, and ship a new blog source |
+| `/add-youtuber` | Resolve, verify, add, and ship a new YouTube channel source |
 | `/check-localstack` | Verify LocalStack is up and initialised before local dev |
 | `/test-integration` | Run digest integration tests against LocalStack |
 | `/test-all` | Full suite: unit, integration, infra health, manual checks |
