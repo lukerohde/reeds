@@ -57,7 +57,7 @@ blogs:
     feed: https://steve-yegge.blogspot.com/feeds/posts/default
   - author: Addy Osmani
     url: https://addyosmani.com/blog
-    feed: https://addyosmani.com/blog/rss.xml
+    feed: https://addyosmani.com/feed.xml
   - author: Bryan Cantrill
     url: https://bcantrill.dtrace.org
     feed: https://bcantrill.dtrace.org/index.xml
