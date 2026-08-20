@@ -16,7 +16,7 @@ os.environ.setdefault('AWS_ACCESS_KEY_ID', 'test')
 os.environ.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
 
 import handler as _h
-from handler import select_candidates, build_curation_pool, read_time_label, build_html
+from handler import select_candidates, build_curation_pool, read_time_label, build_html, article_anchor_id
 
 
 def _art(author, i=0):
@@ -190,6 +190,24 @@ class TestBuildHtml:
         html = build_html([article], '2024-01-15', None)
         assert '&lt;table&gt;' in html
         assert '<table>' not in html
+
+    def test_article_has_anchor_id_for_deep_linking(self):
+        anchor_id = article_anchor_id(self._article['url'])
+        html = build_html([self._article], '2024-01-15', None)
+        assert f'<article id="{anchor_id}">' in html
+
+    def test_share_button_carries_deep_link_data(self):
+        anchor_id = article_anchor_id(self._article['url'])
+        html = build_html([self._article], '2024-01-15', None)
+        assert 'class="share-btn"' in html
+        assert f'data-id="{anchor_id}"' in html
+        assert 'data-page="/digest/2024-01-15/"' in html
+        assert 'data-title="My Article Title"' in html
+
+    def test_share_button_summary_strips_markdown(self):
+        article = {**self._article, 'summary': '**TLDR:** *Key* insight here.'}
+        html = build_html([article], '2024-01-15', None)
+        assert 'data-summary="TLDR: Key insight here."' in html
 
 
 # ── TestMakeSummaryWordCount ──────────────────────────────────────────────────
