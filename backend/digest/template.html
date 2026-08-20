@@ -71,6 +71,19 @@
   h2 { font-size: 1.05rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.3rem; }
   h2 a { color: var(--text); text-decoration: none; }
   h2 a:hover { color: var(--link); text-decoration: underline; }
+  .share-btn {
+    background: none; border: none; cursor: pointer; position: relative;
+    font-family: var(--font); font-size: 0.78rem; font-weight: 500;
+    color: var(--muted); margin-left: 0.4rem; padding: 0 0.1rem;
+    vertical-align: middle; line-height: 1;
+  }
+  .share-btn:hover { color: var(--link); }
+  .share-tip {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    margin-bottom: 0.3rem; background: var(--text); color: var(--bg);
+    font-size: 0.7rem; font-weight: 500; padding: 0.2rem 0.5rem;
+    border-radius: 4px; white-space: nowrap; pointer-events: none;
+  }
   .date-divider {
     padding: 2rem 0 0.25rem;
     border-top: 2px solid var(--border-light);
@@ -190,6 +203,43 @@
   );
   observer.observe(sentinel);
 }());
+
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest && e.target.closest('.share-btn');
+  if (!btn) return;
+  var url = location.origin + btn.dataset.page + '#' + btn.dataset.id;
+  var data = { title: btn.dataset.title, text: btn.dataset.summary, url: url };
+
+  function showCopied() {
+    var tip = document.createElement('span');
+    tip.className = 'share-tip';
+    tip.textContent = 'Copied!';
+    btn.appendChild(tip);
+    setTimeout(function () { tip.remove(); }, 1200);
+  }
+
+  function fallbackCopy() {
+    var ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (err) {}
+    document.body.removeChild(ta);
+    showCopied();
+  }
+
+  if (navigator.share) {
+    navigator.share(data).catch(function () {});
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(showCopied).catch(fallbackCopy);
+    return;
+  }
+  fallbackCopy();
+});
 </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import hashlib
 from html import escape as html_escape
 import yaml
 import boto3
@@ -304,6 +305,26 @@ def prev_digest_date(current_date_str):
         return None
 
 
+def article_anchor_id(url):
+    """Turn an article URL into a short, stable, deep-linkable anchor id.
+
+    Slugifies the path so ids stay readable, then appends a short hash of the
+    full URL so two articles that slugify to the same text (different query
+    strings, a trailing slash) still get distinct anchors.
+    """
+    path   = re.sub(r'^https?://', '', url)
+    slug   = re.sub(r'[^a-z0-9]+', '-', path.lower()).strip('-')[:60].strip('-')
+    digest = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f'a-{slug}-{digest}' if slug else f'a-{digest}'
+
+
+def _strip_md_emphasis(text):
+    """Strip markdown bold/italic markers for plain-text contexts (share sheets)."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'\1', text)
+    return text
+
+
 def _md_to_html(text):
     """Convert bold/italic markdown to HTML so summaries render correctly.
 
@@ -327,8 +348,10 @@ def _detail_to_html(text):
 
 
 def build_html(articles, date_str, prev_date_str):
+    page_path = f'/digest/{date_str}/'
     items_html = ''
     for a in articles:
+        anchor_id  = article_anchor_id(a['url'])
         read_time  = read_time_label(a.get('word_count', 0))
         meta_parts = [html_escape(a['author']), a.get('published_date', '')[:10]]
         if read_time:
@@ -342,9 +365,15 @@ def build_html(articles, date_str, prev_date_str):
         <summary>read more</summary>
         <div class="detail-body">{_detail_to_html(detail)}</div>
       </details>"""
+        share_text = html_escape(_strip_md_emphasis(a.get('summary', '')))
         items_html += f"""
-    <article>
-      <h2><a href="{html_escape(a['url'], quote=True)}">{html_escape(a['title'])}</a></h2>
+    <article id="{anchor_id}">
+      <h2>
+        <a href="{html_escape(a['url'], quote=True)}">{html_escape(a['title'])}</a>
+        <button type="button" class="share-btn" aria-label="Copy share link"
+          data-id="{anchor_id}" data-page="{page_path}"
+          data-title="{html_escape(a['title'])}" data-summary="{share_text}">share</button>
+      </h2>
       <p class="meta">{meta}</p>
       <p class="summary">{_md_to_html(a.get('summary', ''))}</p>{detail_html}
     </article>"""
