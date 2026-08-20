@@ -73,11 +73,11 @@
   h2 a:hover { color: var(--link); text-decoration: underline; }
   .share-btn {
     background: none; border: none; cursor: pointer; position: relative;
-    font-family: var(--font); font-size: 0.78rem; font-weight: 500;
-    color: var(--muted); margin-left: 0.4rem; padding: 0 0.1rem;
-    vertical-align: middle; line-height: 1;
+    display: inline-flex; align-items: center; color: var(--muted);
+    margin-left: 0.4rem; padding: 0.15rem; vertical-align: -3px;
   }
   .share-btn:hover { color: var(--link); }
+  .share-btn svg { display: block; }
   .share-tip {
     position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
     margin-bottom: 0.3rem; background: var(--text); color: var(--bg);
@@ -230,7 +230,10 @@ document.addEventListener('click', function (e) {
     showCopied();
   }
 
-  if (navigator.share) {
+  // Native share sheet only on phones/tablets — desktop's has no plain "copy
+  // link" option (it's a hidden, opt-in extension), so desktop just copies.
+  var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isMobile && navigator.share) {
     navigator.share(data).catch(function () {});
     return;
   }

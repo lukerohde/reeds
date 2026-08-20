@@ -48,6 +48,15 @@ ai       = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY', ''))
 
 TEMPLATE = (Path(__file__).parent / 'template.html').read_text()
 
+# Standard "share" glyph (box + arrow out the top) — recognisable without a label.
+SHARE_ICON = (
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/>'
+    '<polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>'
+    '</svg>'
+)
+
 
 # ── Candidate selection ───────────────────────────────────────────────────────
 
@@ -370,9 +379,9 @@ def build_html(articles, date_str, prev_date_str):
     <article id="{anchor_id}">
       <h2>
         <a href="{html_escape(a['url'], quote=True)}">{html_escape(a['title'])}</a>
-        <button type="button" class="share-btn" aria-label="Copy share link"
+        <button type="button" class="share-btn" aria-label="Share this article"
           data-id="{anchor_id}" data-page="{page_path}"
-          data-title="{html_escape(a['title'])}" data-summary="{share_text}">share</button>
+          data-title="{html_escape(a['title'])}" data-summary="{share_text}">{SHARE_ICON}</button>
       </h2>
       <p class="meta">{meta}</p>
       <p class="summary">{_md_to_html(a.get('summary', ''))}</p>{detail_html}
